@@ -406,7 +406,7 @@ class Trader:
     
         return orders, buy_order_volume, sell_order_volume
 
-    def run(self, state: TradingState, round_num: Optional[int], day_num: Optional[int]) -> tuple[dict[Symbol, List[Order]], int, str]:
+    def run(self, state: TradingState) -> tuple[dict[Symbol, List[Order]], int, str]:
         original_state = copy.deepcopy(state)
         # traderData를 디코딩하여 상태를 복원 (없으면 새로 생성)
         traderObject = {}

@@ -279,13 +279,6 @@ def match_orders(
         for product, trades in data.trades[state.timestamp].items()
     }
 
-    # Prosperity 4 docs describe own_trades / market_trades as the trades that
-    # happened since the last TradingState. Reset them every iteration so that
-    # products with no new trades expose [] instead of stale values from an
-    # earlier timestamp.
-    next_own_trades: dict[Symbol, list[Trade]] = {product: [] for product in data.products}
-    next_market_trades: dict[Symbol, list[Trade]] = {product: [] for product in data.products}
-
     for product in data.products:
         new_trades = []
 
@@ -300,22 +293,18 @@ def match_orders(
                 )
             )
 
-        next_own_trades[product] = new_trades
         if len(new_trades) > 0:
+            state.own_trades[product] = new_trades
             result.trades.extend([TradeRow(trade) for trade in new_trades])
 
-    for product in data.products:
-        trades = market_trades.get(product, [])
+    for product, trades in market_trades.items():
         for trade in trades:
             trade.trade.quantity = min(trade.buy_quantity, trade.sell_quantity)
 
         remaining_market_trades = [t.trade for t in trades if t.trade.quantity > 0]
-        next_market_trades[product] = remaining_market_trades
-        if len(remaining_market_trades) > 0:
-            result.trades.extend([TradeRow(trade) for trade in remaining_market_trades])
 
-    state.own_trades = next_own_trades
-    state.market_trades = next_market_trades
+        state.market_trades[product] = remaining_market_trades
+        result.trades.extend([TradeRow(trade) for trade in remaining_market_trades])
 
 
 def run_backtest(
@@ -370,10 +359,10 @@ def run_backtest(
 
         if print_output:
             with closing(Tee(stdout)):
-                orders, conversions, trader_data = trader.run(state,day_num)
+                orders, conversions, trader_data = trader.run(state)
         else:
             with redirect_stdout(stdout):
-                orders, conversions, trader_data = trader.run(state,day_num)
+                orders, conversions, trader_data = trader.run(state)
 
         sandbox_row = SandboxLogRow(
             timestamp=timestamp,
