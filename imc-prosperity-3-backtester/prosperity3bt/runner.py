@@ -57,9 +57,10 @@ def prepare_state(state: TradingState, data: BacktestData) -> None:
             sunlightIndex=observation_row.sunlightIndex,
         )
 
-        state.observations = Observation(
-            plainValueObservations={}, conversionObservations={"MAGNIFICENT_MACARONS": conversion_observation}
-        )
+        # state.observations = Observation(
+        #     plainValueObservations={}, conversionObservations={"MAGNIFICENT_MACARONS": conversion_observation}
+        # )
+        state.observations = Observation({}, {})
 
 
 def type_check_orders(orders: dict[Symbol, list[Order]]) -> None:
@@ -176,7 +177,7 @@ def match_buy_order(
         if (
             market_trade.sell_quantity == 0
             or market_trade.trade.price > order.price
-            or (market_trade.trade.price == order.price and trade_matching_mode == TradeMatchingMode.worse)
+            or (market_trade.trade.price == order.price and trade_matching_mode == TradeMatchingMode.all)
         ):
             continue
 
@@ -232,7 +233,7 @@ def match_sell_order(
         if (
             market_trade.buy_quantity == 0
             or market_trade.trade.price < order.price
-            or (market_trade.trade.price == order.price and trade_matching_mode == TradeMatchingMode.worse)
+            or (market_trade.trade.price == order.price and trade_matching_mode == TradeMatchingMode.all)
         ):
             continue
 
@@ -348,6 +349,10 @@ def run_backtest(
     for timestamp in timestamps_iterator:
         state.timestamp = timestamp
         state.traderData = trader_data
+        # own_trades / market_trades should contain only trades since the last TradingState.
+        # Reset them every iteration so stale trades from the previous timestamp do not leak through.
+        state.own_trades = {product: [] for product in data.products}
+        state.market_trades = {product: [] for product in data.products}
 
         prepare_state(state, data)
 
