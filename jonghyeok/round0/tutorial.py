@@ -153,8 +153,10 @@ class Trader:
             params = PARAMS
         self.params = params
         self.LIMIT = {
-            Product.EMERALDS: 80,
-            Product.TOMATOES: 80,
+            # Product.EMERALDS: 80,
+            # Product.TOMATOES: 80,
+            Product.ASH_COATED_OSMIUM: 80,
+            Product.INTARIAN_PEPPER_ROOT: 80
         }
     
     def bid(self):
