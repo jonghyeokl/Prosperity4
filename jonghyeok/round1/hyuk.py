@@ -143,7 +143,10 @@ class Trader:
                     traderObject["intarian_pepper_root_last_mid_price_history"] = []
                 # for first 10 timestamps or position < half of limit, buy all of ask 1
                 have_to_buy = False
-                if len(traderObject["intarian_pepper_root_last_mid_price_history"]) < 10 or position < limit / 2:
+                beginning = False
+                if len(traderObject["intarian_pepper_root_last_mid_price_history"]) < 10:
+                    beginning = True
+                if beginning or position < limit / 2:
                     have_to_buy = True
                 
                 # get fair value
@@ -175,18 +178,18 @@ class Trader:
                 if order_depth.buy_orders:
                     for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
                         if position > -limit:
-                            if bid_price > fair_value:
+                            if (not beginning) and (bid_price > fair_value):
                                 sell_qty = min(bid_vol, limit + position)
                                 if sell_qty > 0:
                                     orders.append(Order(product, bid_price, -sell_qty))
                                     position -= sell_qty
                 
-                if position < limit:
+                if position < limit and not beginning:
                     best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
                     if best_bid is not None and best_bid + 1 >= fair_value:
                         orders.append(Order(product, best_bid + 1, limit - position))
                 
-                if position > -limit:
+                if position > -limit and not beginning:
                     best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
                     if best_ask is not None and best_ask - 1 < fair_value:
                         orders.append(Order(product, best_ask - 1, limit + position))
