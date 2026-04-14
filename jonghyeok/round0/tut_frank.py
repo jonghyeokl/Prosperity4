@@ -453,40 +453,42 @@ class DynamicTrader(ProductTrader):
 
     def get_orders(self):
 
-        if self.wall_mid is not None:
+        return {self.name: []}
 
-            bid_price = self.bid_wall + 1
-            bid_volume = self.max_allowed_buy_volume
+        # if self.wall_mid is not None:
 
-            if self.informed_bought_ts is not None and self.informed_bought_ts + 5_00 >= self.state.timestamp:
-                if self.initial_position < 40:
-                    bid_price = self.ask_wall
-                    bid_volume = 40 - self.initial_position
+        #     bid_price = self.bid_wall + 1
+        #     bid_volume = self.max_allowed_buy_volume
 
-            else:
+        #     if self.informed_bought_ts is not None and self.informed_bought_ts + 5_00 >= self.state.timestamp:
+        #         if self.initial_position < 40:
+        #             bid_price = self.ask_wall
+        #             bid_volume = 40 - self.initial_position
 
-                if self.wall_mid - bid_price < 1 and (self.informed_direction == SHORT and self.initial_position > -40):
-                    bid_price = self.bid_wall
+        #     else:
 
-            self.bid(bid_price, bid_volume)
+        #         if self.wall_mid - bid_price < 1 and (self.informed_direction == SHORT and self.initial_position > -40):
+        #             bid_price = self.bid_wall
 
-
-            ask_price = self.ask_wall - 1
-            ask_volume = self.max_allowed_sell_volume
-
-            if self.informed_sold_ts is not None and self.informed_sold_ts + 5_00 >= self.state.timestamp:
-
-                if self.initial_position > -40:
-                    ask_price = self.bid_wall
-                    ask_volume = 40 + self.initial_position
-
-            if ask_price - self.wall_mid < 1 and (self.informed_direction == LONG and self.initial_position < 40):
-                ask_price = self.ask_wall
-
-            self.ask(ask_price, ask_volume)
+        #     self.bid(bid_price, bid_volume)
 
 
-        return {self.name: self.orders}
+        #     ask_price = self.ask_wall - 1
+        #     ask_volume = self.max_allowed_sell_volume
+
+        #     if self.informed_sold_ts is not None and self.informed_sold_ts + 5_00 >= self.state.timestamp:
+
+        #         if self.initial_position > -40:
+        #             ask_price = self.bid_wall
+        #             ask_volume = 40 + self.initial_position
+
+        #     if ask_price - self.wall_mid < 1 and (self.informed_direction == LONG and self.initial_position < 40):
+        #         ask_price = self.ask_wall
+
+        #     self.ask(ask_price, ask_volume)
+
+
+        # return {self.name: self.orders}
     
 
 
@@ -1003,11 +1005,6 @@ class Trader:
             },
         }
 
-        def export(prints):
-            try: print(json.dumps(prints))
-            except: pass
-
-
         product_traders = {
             STATIC_SYMBOL: StaticTrader,
             DYNAMIC_SYMBOL: DynamicTrader,
@@ -1035,5 +1032,4 @@ class Trader:
 
         # Logger를 사용하여 로그를 출력 (참고 문서에 따라 flush() 호출)
         logger.flush(original_state, result, conversions, final_trader_data)
-        export(prints)
         return result, conversions, final_trader_data
