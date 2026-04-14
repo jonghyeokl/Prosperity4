@@ -148,9 +148,9 @@ class Trader:
             orders: List[Order] = []
             position = state.position.get(product, 0)
             limit = 80
-            #아래 두개 통일하는게 좀 더 맞는거 같기도? 0.75, 0.95로 넣었을때보단 조금 작긴함.
-            must_sell_ratio = 0.9
-            must_buy_ratio = 0.9
+            must_sell_buy_coeff = 0.15
+            must_sell_ratio = 1 - must_sell_buy_coeff + must_sell_buy_coeff * (limit - position) / (limit * 2 * 2)
+            must_buy_ratio = 1 - must_sell_buy_coeff + must_sell_buy_coeff * (limit - position) / (limit * 2 * 2)
             buy_limit = limit - position
             sell_limit = limit + position
 
