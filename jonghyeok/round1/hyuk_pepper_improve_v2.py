@@ -136,16 +136,10 @@ class Trader:
             orders: List[Order] = []
             position = state.position.get(product, 0)
             limit = 80
-            must_sell_ratio = 0.7
-            # 기존 248558
-            # 1 249298
-            # 0.9 250734
-            # 0.8 251905
-            # 0.75 252003
-            # 0.7 252026
-            # 0.65 252026
-            # 0.6 251698
-            # 0.5 248660
+            must_sell_ratio = 0.75
+            must_buy_ratio = 0.95
+            buy_limit = limit - position
+            sell_limit = limit + position
 
             if product == "INTARIAN_PEPPER_ROOT":
                 # initial state
@@ -153,7 +147,7 @@ class Trader:
                     traderObject["intarian_pepper_root_last_ask_price_history"] = []
                 if "intarian_pepper_root_last_bid_price_history" not in traderObject:
                     traderObject["intarian_pepper_root_last_bid_price_history"] = []
-                # for first 10 timestamps or position < half of limit, buy all of ask 1
+                
                 beginning_never_trade = False
                 if len(traderObject["intarian_pepper_root_last_ask_price_history"]) < 2:
                     beginning_never_trade = True
@@ -164,6 +158,7 @@ class Trader:
                 avg_bid_price = sum(traderObject["intarian_pepper_root_last_bid_price_history"]) / len(traderObject["intarian_pepper_root_last_bid_price_history"]) if len(traderObject["intarian_pepper_root_last_bid_price_history"]) > 0 else 0
                 fair_bid_value = (avg_bid_price + 0.1 * (len(traderObject["intarian_pepper_root_last_bid_price_history"]) + 1)/2 + 0.1) if avg_bid_price != 0 else 0
                 must_sell_price = (fair_ask_value * must_sell_ratio + fair_bid_value * (1 - must_sell_ratio)) if (fair_ask_value != 0 and fair_bid_value != 0) else 0
+                must_buy_price = (fair_ask_value * must_buy_ratio + fair_bid_value * (1 - must_buy_ratio)) if (fair_ask_value != 0 and fair_bid_value != 0) else 0
                 # calculate mid price
                 best_ask_price = min(order_depth.sell_orders.keys()) if (order_depth.sell_orders and any(order_depth.sell_orders.values())) else 0
                 best_bid_price = max(order_depth.buy_orders.keys()) if (order_depth.buy_orders and any(order_depth.buy_orders.values())) else 0
@@ -185,11 +180,12 @@ class Trader:
                 if order_depth.sell_orders:
                     for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
                         if position < limit:
-                            if not beginning_never_trade and ask_price <= fair_ask_value:
+                            if not beginning_never_trade and ask_price <= must_buy_price:
                                 buy_qty = min(-ask_vol, limit - position)
                                 if buy_qty > 0:
                                     orders.append(Order(product, ask_price, buy_qty))
                                     position += buy_qty
+                                    buy_limit -= buy_qty
                 if order_depth.buy_orders:
                     for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
                         if position > -limit:
@@ -198,16 +194,17 @@ class Trader:
                                 if sell_qty > 0:
                                     orders.append(Order(product, bid_price, -sell_qty))
                                     position -= sell_qty
+                                    sell_limit -= sell_qty
                 
                 if position < limit and not beginning_never_trade:
                     best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
-                    if best_bid is not None and best_bid + 1 <= fair_ask_value:
-                        orders.append(Order(product, best_bid + 1, limit - position))
+                    if best_bid is not None and best_bid + 1 <= must_buy_price:
+                        orders.append(Order(product, best_bid + 1, min(buy_limit, limit - position)))
                 
                 if position > -limit and not beginning_never_trade:
                     best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
                     if best_ask is not None and best_ask - 1 >= must_sell_price:
-                        orders.append(Order(product, best_ask - 1, -limit - position))
+                        orders.append(Order(product, best_ask - 1, max(-sell_limit, -limit - position)))
 
             elif product == "ASH_COATED_OSMIUM":
                 # Mean-reversion: only cross spread at favorable prices
