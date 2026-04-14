@@ -157,6 +157,9 @@ class Trader:
             Product.TOMATOES: 80,
         }
     
+    def bid(self):
+        return 0
+    
     def take_best_orders(
         self,
         product: str,
