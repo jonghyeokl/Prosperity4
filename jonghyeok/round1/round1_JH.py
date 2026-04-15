@@ -125,9 +125,7 @@ class Trader:
     }
 
     PEPPER_HISTORY_LENGTH = 99
-
     PEPPER_MUST_SELL_BUY_COEFF = 0.33
-
     PEPPER_ALPHA = 9
 
     ASH_EMA_WINDOW = 110
@@ -165,10 +163,6 @@ class Trader:
             position = state.position.get(product, 0)
             limit = self.POSITION_LIMITS[product]
 
-            # coefficients
-
-            fair_value_coeff = 1 - self.PEPPER_MUST_SELL_BUY_COEFF * pow(((limit + position) / (limit * 2)) , self.PEPPER_ALPHA)
-
             buy_limit = limit - position
             sell_limit = limit + position
 
@@ -183,6 +177,7 @@ class Trader:
                 if len(traderObject["intarian_pepper_root_last_ask_price_history"]) < 1:
                     beginning_never_trade = True
                 
+                fair_value_coeff = 1 - self.PEPPER_MUST_SELL_BUY_COEFF * pow(((limit + position) / (limit * 2)) , self.PEPPER_ALPHA)
                 # get fair value
                 avg_ask_price = sum(traderObject["intarian_pepper_root_last_ask_price_history"]) / len(traderObject["intarian_pepper_root_last_ask_price_history"]) if len(traderObject["intarian_pepper_root_last_ask_price_history"]) > 0 else 0
                 fair_ask_value = (avg_ask_price + 0.1 * (len(traderObject["intarian_pepper_root_last_ask_price_history"]) + 1)/2 + 0.1) if avg_ask_price != 0 else 0
