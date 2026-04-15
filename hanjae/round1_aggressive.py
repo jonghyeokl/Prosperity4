@@ -220,120 +220,196 @@ class Trader:
                         orders.append(Order(product, best_ask - 1, max(-sell_limit, -limit - position)))
 
             elif product == "ASH_COATED_OSMIUM":
-                # -----------------------------
-                # ASH_COATED_OSMIUM strategy
-                # mean-reversion + inventory-aware market making
-                # -----------------------------
+                # =====================================================
+                # ASH trend-follow + fair-based partial unwind
+                # - follow trend lightly
+                # - buy pullbacks below fair in downtrend
+                # - sell rallies above fair in uptrend
+                # - never flip full inventory at once
+                # - strictly enforce position limits
+                # =====================================================
+
+                # ---------- state ----------
                 if "ash_mid_history" not in traderObject:
                     traderObject["ash_mid_history"] = []
-
+                if "ash_fast_ema" not in traderObject:
+                    traderObject["ash_fast_ema"] = 10000.0
+                if "ash_slow_ema" not in traderObject:
+                    traderObject["ash_slow_ema"] = 10000.0
+                if "ash_trend_inventory" not in traderObject:
+                    traderObject["ash_trend_inventory"] = 0
                 if "ash_last_fair" not in traderObject:
                     traderObject["ash_last_fair"] = 10000.0
 
                 best_bid, best_ask = self.get_best_bid_ask(order_depth)
-
                 if best_bid is None or best_ask is None:
                     result[product] = []
                     continue
 
+                mid_price = (best_bid + best_ask) / 2
+                spread = best_ask - best_bid
                 best_bid_vol = order_depth.buy_orders[best_bid]
                 best_ask_vol = -order_depth.sell_orders[best_ask]
 
-                mid_price = (best_bid + best_ask) / 2
-
-                # Microprice: slightly shifts fair toward the thinner side
-                total_top_vol = best_bid_vol + best_ask_vol
-                if total_top_vol > 0:
-                    micro_price = (best_ask * best_bid_vol + best_bid * best_ask_vol) / total_top_vol
-                else:
-                    micro_price = mid_price
-
-                # Rolling history
+                # ---------- fair value: slow center, not mean-reversion trigger ----------
                 hist = traderObject["ash_mid_history"]
                 hist.append(mid_price)
-                if len(hist) > 40: # 40개가 최적 / history mean 말고 wall price avg도 시도해보기
+                if len(hist) > 40:
                     hist.pop(0)
 
-                rolling_mid = sum(hist) / len(hist)
-
-                # Blend stable fair + short-term book signal
-                raw_fair = 1.0 * rolling_mid + 0.0 * micro_price
-
-                # Inventory skew
-                # long -> lower fair so we sell more aggressively
-                # short -> higher fair so we buy more aggressively
-                inventory_skew = 0.04 * position # limit과 position에 대한 함수로?
-                fair_value = raw_fair - inventory_skew # 단위가 안맞지 않나..? 야매 같은데
+                fair_value = sum(hist) / len(hist)
                 traderObject["ash_last_fair"] = fair_value
 
-                spread = best_ask - best_bid
+                # ---------- trend signal ----------
+                fast_alpha = 0.22
+                slow_alpha = 0.06
 
-                # Parameters
-                take_edge = 0.0
-                join_edge = 0.0
-                default_quote_size = 12
-                max_take_size = 20
+                traderObject["ash_fast_ema"] = (1 - fast_alpha) * traderObject["ash_fast_ema"] + fast_alpha * mid_price
+                traderObject["ash_slow_ema"] = (1 - slow_alpha) * traderObject["ash_slow_ema"] + slow_alpha * mid_price
 
-                # 1) Aggressively take clearly favorable quotes
-                for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
-                    if position >= limit:
-                        break
-                    if ask_price <= fair_value - take_edge:
-                        buy_qty = min(-ask_vol, limit - position, max_take_size)
-                        if buy_qty > 0:
-                            orders.append(Order(product, ask_price, buy_qty))
-                            position += buy_qty
+                fast_ema = traderObject["ash_fast_ema"]
+                slow_ema = traderObject["ash_slow_ema"]
+                trend_signal = fast_ema - slow_ema
 
-                for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
-                    if position <= -limit:
-                        break
-                    if bid_price >= fair_value + take_edge:
-                        sell_qty = min(bid_vol, limit + position, max_take_size)
-                        if sell_qty > 0:
-                            orders.append(Order(product, bid_price, -sell_qty))
-                            position -= sell_qty
+                uptrend = trend_signal > 0.8
+                downtrend = trend_signal < -0.8
 
-                # 2) Passive market making
-                # position-aware sizes
-                buy_capacity = limit - position
-                sell_capacity = limit + position
+                # track only the inventory accumulated by the trend-follow leg
+                trend_inventory = traderObject["ash_trend_inventory"]
 
-                buy_size = min(default_quote_size, max(0, buy_capacity))
-                sell_size = min(default_quote_size, max(0, sell_capacity))
+                # ---------- helper capacities ----------
+                # These MUST be updated after every order to keep within limit.
+                buy_remaining = limit - position
+                sell_remaining = limit + position
 
-                # reduce same-direction quoting if inventory is already large
-                # +-50을 기준으로 잡아두면 너무 확확 꺾일듯. (limit-position)에 대한 함수로 만들 수 있을 것 같음
-                if position > 50:
-                    buy_size = min(buy_size, 3)
-                    sell_size = min(sell_size, 20)
-                elif position < -50:
-                    sell_size = min(sell_size, 3)
-                    buy_size = min(buy_size, 20)
+                def place_buy(price: int, qty: int):
+                    nonlocal position, buy_remaining, sell_remaining, trend_inventory
+                    qty = max(0, min(qty, buy_remaining))
+                    if qty > 0:
+                        orders.append(Order(product, price, qty))
+                        position += qty
+                        buy_remaining = limit - position
+                        sell_remaining = limit + position
+                        return qty
+                    return 0
 
-                # quote placement
+                def place_sell(price: int, qty: int):
+                    nonlocal position, buy_remaining, sell_remaining, trend_inventory
+                    qty = max(0, min(qty, sell_remaining))
+                    if qty > 0:
+                        orders.append(Order(product, price, -qty))
+                        position -= qty
+                        buy_remaining = limit - position
+                        sell_remaining = limit + position
+                        return qty
+                    return 0
+
+                # ---------- parameters ----------
+                trend_entry_size = 8          # how much to add when following trend
+                unwind_size = 6               # how much to unwind per opportunity
+                passive_base_size = 8         # smaller than before to keep smoother inventory
+                max_trend_inventory = 30      # cap for trend-follow inventory only
+                fair_band = 1.0               # "fair 이하/이상" buffer
+
+                # =====================================================
+                # 1) Trend-follow entry
+                # =====================================================
+                # Uptrend: buy strength, but only build a bounded long trend inventory
+                if uptrend and trend_inventory < max_trend_inventory:
+                    # aggressive buy only when the market is actually pushing up
+                    # and we still have room in trend inventory
+                    qty = min(best_ask_vol, trend_entry_size, max_trend_inventory - trend_inventory)
+                    bought = place_buy(best_ask, qty)
+                    trend_inventory += bought
+
+                # Downtrend: sell weakness, but only build a bounded short trend inventory
+                elif downtrend and trend_inventory > -max_trend_inventory:
+                    qty = min(best_bid_vol, trend_entry_size, max_trend_inventory + trend_inventory)
+                    sold = place_sell(best_bid, qty)
+                    trend_inventory -= sold
+
+                # =====================================================
+                # 2) Fair-based partial unwind
+                # =====================================================
+                # This is the core requested logic:
+                # - In downtrend, if price falls sufficiently below fair, buy back PART of the short trend inventory
+                # - In uptrend, if price rises sufficiently above fair, sell PART of the long trend inventory
+                #
+                # Important: only unwind PART of the trend inventory, do not flip whole position.
+                #
+                # Downtrend + below fair -> partial buyback of short inventory
+                if downtrend and mid_price <= fair_value - fair_band and trend_inventory < 0:
+                    qty = min(best_ask_vol, unwind_size, -trend_inventory)
+                    bought = place_buy(best_ask, qty)
+                    trend_inventory += bought
+
+                # Uptrend + above fair -> partial sell of long inventory
+                if uptrend and mid_price >= fair_value + fair_band and trend_inventory > 0:
+                    qty = min(best_bid_vol, unwind_size, trend_inventory)
+                    sold = place_sell(best_bid, qty)
+                    trend_inventory -= sold
+
+                # =====================================================
+                # 3) Passive quoting, gently aligned with current regime
+                # =====================================================
+                # Keep it smooth; do not go full long/full short.
+                # Quote sizes lean with trend_inventory, but remain bounded.
+                buy_size = min(passive_base_size, buy_remaining)
+                sell_size = min(passive_base_size, sell_remaining)
+
+                # inventory smoothing: if already long, reduce bid size; if short, reduce ask size
+                if position > 0:
+                    buy_size = max(0, buy_size - position // 20)
+                    sell_size = min(sell_remaining, sell_size + position // 20)
+                elif position < 0:
+                    sell_size = max(0, sell_size - (-position) // 20)
+                    buy_size = min(buy_remaining, buy_size + (-position) // 20)
+
+                # quote placement:
+                # uptrend -> slightly more aggressive bid
+                # downtrend -> slightly more aggressive ask
                 if spread >= 2:
-                    bid_quote = min(best_bid + 1, math.floor(fair_value - join_edge))
-                    ask_quote = max(best_ask - 1, math.ceil(fair_value + join_edge))
+                    if uptrend:
+                        bid_quote = best_bid + 1
+                        ask_quote = best_ask
+                    elif downtrend:
+                        bid_quote = best_bid
+                        ask_quote = best_ask - 1
+                    else:
+                        bid_quote = best_bid + 1
+                        ask_quote = best_ask - 1
                 else:
-                    bid_quote = math.floor(fair_value - 1)
-                    ask_quote = math.ceil(fair_value + 1)
+                    bid_quote = best_bid
+                    ask_quote = best_ask
 
-                # make sure not to cross unintentionally
+                # safety checks to avoid crossing
                 if bid_quote >= best_ask:
-                    bid_quote = best_ask - 1
+                    bid_quote = best_bid
                 if ask_quote <= best_bid:
-                    ask_quote = best_bid + 1
+                    ask_quote = best_ask
+
+                # recompute with latest remaining capacities
+                buy_size = min(buy_size, buy_remaining)
+                sell_size = min(sell_size, sell_remaining)
 
                 if buy_size > 0 and bid_quote < best_ask:
-                    orders.append(Order(product, bid_quote, buy_size))
+                    placed = place_buy(bid_quote, buy_size)
+                    # passive quotes are NOT counted as trend inventory
 
                 if sell_size > 0 and ask_quote > best_bid:
-                    orders.append(Order(product, ask_quote, -sell_size))
+                    placed = place_sell(ask_quote, sell_size)
+                    # passive quotes are NOT counted as trend inventory
+
+                traderObject["ash_trend_inventory"] = trend_inventory
 
                 logger.print(
-                    f"ASH pos={position}, bb={best_bid}, ba={best_ask}, mid={mid_price:.1f}, "
-                    f"micro={micro_price:.2f}, fair={fair_value:.2f}, "
-                    f"bid_q={bid_quote}, ask_q={ask_quote}"
+                    f"[ASH TF-PARTIAL] pos={position}, trend_inv={trend_inventory}, "
+                    f"bb={best_bid}, ba={best_ask}, mid={mid_price:.1f}, fair={fair_value:.2f}, "
+                    f"fast={fast_ema:.2f}, slow={slow_ema:.2f}, trend={trend_signal:.2f}, "
+                    f"up={uptrend}, down={downtrend}, "
+                    f"buy_rem={buy_remaining}, sell_rem={sell_remaining}, "
+                    f"bid_q={bid_quote}, ask_q={ask_quote}, "
+                    f"buy_sz={buy_size}, sell_sz={sell_size}"
                 )
 
             result[product] = orders
