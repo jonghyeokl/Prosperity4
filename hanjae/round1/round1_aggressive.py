@@ -1,10 +1,10 @@
-from datamodel import OrderDepth, UserId, TradingState, Order
+from hanjae.round1.datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List, Any
 import json
 import jsonpickle
 import math
 import copy
-from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
+from hanjae.round1.datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState
 
 
 class Logger:
