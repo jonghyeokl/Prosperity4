@@ -221,14 +221,18 @@ class Trader:
                 
                 if position < limit and not beginning_never_trade:
                     best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
-                    if best_bid is not None and best_bid + 1 <= fair_price:
+                    if best_bid is not None and best_bid + 5 <= fair_price:
+                        orders.append(Order(product, best_bid + 2, min(buy_limit, limit - position)))
+                    elif best_bid is not None and best_bid + 1 <= fair_price:
                         orders.append(Order(product, best_bid + 1, min(buy_limit, limit - position)))
                     else:
                         orders.append(Order(product, round(fair_price - 0.5), min(buy_limit, limit - position)))
                 
                 if position > -limit and not beginning_never_trade:
                     best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
-                    if best_ask is not None and best_ask - 1 >= fair_price:
+                    if best_ask is not None and best_ask - 5 >= fair_price:
+                        orders.append(Order(product, best_ask - 2, max(-sell_limit, -limit - position)))
+                    elif best_ask is not None and best_ask - 1 >= fair_price:
                         orders.append(Order(product, best_ask - 1, max(-sell_limit, -limit - position)))
                     else:
                         orders.append(Order(product, round(fair_price + 0.5), max(-sell_limit, -limit - position)))
