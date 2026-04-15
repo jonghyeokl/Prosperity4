@@ -148,9 +148,13 @@ class Trader:
             orders: List[Order] = []
             position = state.position.get(product, 0)
             limit = 80
-            must_sell_buy_coeff = 0.15
-            must_sell_ratio = 1 - must_sell_buy_coeff + must_sell_buy_coeff * (limit - position) / (limit * 2 * 2)
-            must_buy_ratio = 1 - must_sell_buy_coeff + must_sell_buy_coeff * (limit - position) / (limit * 2 * 2)
+
+            # coefficients
+            history_length = 399 # 클수록 잘 나오나 느려짐, 이정도면 충분한듯
+            must_sell_buy_coeff = 0.1 # 클수록 더 쉽게 팖
+
+
+            fair_value_coeff = 1 - must_sell_buy_coeff + must_sell_buy_coeff * (limit - position) / (limit * 2)
             buy_limit = limit - position
             sell_limit = limit + position
 
@@ -170,20 +174,19 @@ class Trader:
                 fair_ask_value = (avg_ask_price + 0.1 * (len(traderObject["intarian_pepper_root_last_ask_price_history"]) + 1)/2 + 0.1) if avg_ask_price != 0 else 0
                 avg_bid_price = sum(traderObject["intarian_pepper_root_last_bid_price_history"]) / len(traderObject["intarian_pepper_root_last_bid_price_history"]) if len(traderObject["intarian_pepper_root_last_bid_price_history"]) > 0 else 0
                 fair_bid_value = (avg_bid_price + 0.1 * (len(traderObject["intarian_pepper_root_last_bid_price_history"]) + 1)/2 + 0.1) if avg_bid_price != 0 else 0
-                must_sell_price = (fair_ask_value * must_sell_ratio + fair_bid_value * (1 - must_sell_ratio)) if (fair_ask_value != 0 and fair_bid_value != 0) else 0
-                must_buy_price = (fair_ask_value * must_buy_ratio + fair_bid_value * (1 - must_buy_ratio)) if (fair_ask_value != 0 and fair_bid_value != 0) else 0
+                fair_price = (fair_ask_value * fair_value_coeff + fair_bid_value * (1 - fair_value_coeff)) if (fair_ask_value != 0 and fair_bid_value != 0) else 0
                 # calculate mid price
                 best_ask_price = min(order_depth.sell_orders.keys()) if (order_depth.sell_orders and any(order_depth.sell_orders.values())) else 0
                 best_bid_price = max(order_depth.buy_orders.keys()) if (order_depth.buy_orders and any(order_depth.buy_orders.values())) else 0
                 # save last 199 prices
                 if best_ask_price != 0:
-                    if len(traderObject["intarian_pepper_root_last_ask_price_history"]) < 199:
+                    if len(traderObject["intarian_pepper_root_last_ask_price_history"]) < history_length:
                         traderObject["intarian_pepper_root_last_ask_price_history"].append(best_ask_price)
                     else:
                         traderObject["intarian_pepper_root_last_ask_price_history"].pop(0)
                         traderObject["intarian_pepper_root_last_ask_price_history"].append(best_ask_price)
                 if best_bid_price != 0:
-                    if len(traderObject["intarian_pepper_root_last_bid_price_history"]) < 199:
+                    if len(traderObject["intarian_pepper_root_last_bid_price_history"]) < history_length:
                         traderObject["intarian_pepper_root_last_bid_price_history"].append(best_bid_price)
                     else:
                         traderObject["intarian_pepper_root_last_bid_price_history"].pop(0)
@@ -193,7 +196,7 @@ class Trader:
                 if order_depth.sell_orders:
                     for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
                         if position < limit:
-                            if not beginning_never_trade and ask_price <= must_buy_price:
+                            if not beginning_never_trade and ask_price <= fair_price:
                                 buy_qty = min(-ask_vol, limit - position)
                                 if buy_qty > 0:
                                     orders.append(Order(product, ask_price, buy_qty))
@@ -202,7 +205,7 @@ class Trader:
                 if order_depth.buy_orders:
                     for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
                         if position > -limit:
-                            if not beginning_never_trade and bid_price >= must_sell_price:
+                            if not beginning_never_trade and bid_price >= fair_price:
                                 sell_qty = min(bid_vol, limit + position)
                                 if sell_qty > 0:
                                     orders.append(Order(product, bid_price, -sell_qty))
@@ -211,27 +214,28 @@ class Trader:
                 
                 if position < limit and not beginning_never_trade:
                     best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
-                    if best_bid is not None and best_bid + 1 <= must_buy_price:
+                    if best_bid is not None and best_bid + 1 <= fair_price:
                         orders.append(Order(product, best_bid + 1, min(buy_limit, limit - position)))
+                    else:
+                        orders.append(Order(product, round(fair_price - 0.5), min(buy_limit, limit - position)))
                 
                 if position > -limit and not beginning_never_trade:
                     best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
-                    if best_ask is not None and best_ask - 1 >= must_sell_price:
+                    if best_ask is not None and best_ask - 1 >= fair_price:
                         orders.append(Order(product, best_ask - 1, max(-sell_limit, -limit - position)))
+                    else:
+                        orders.append(Order(product, round(fair_price + 0.5), max(-sell_limit, -limit - position)))
+
 
             elif product == "ASH_COATED_OSMIUM":
-                # -----------------------------
-                # ASH_COATED_OSMIUM strategy
-                # mean-reversion + inventory-aware market making
-                # -----------------------------
+                # =====================================================
+                # ASH: z-score mean reversion + stale quote capture
+                # fixed logging + actual-position-based target following
+                # =====================================================
                 if "ash_mid_history" not in traderObject:
                     traderObject["ash_mid_history"] = []
 
-                if "ash_last_fair" not in traderObject:
-                    traderObject["ash_last_fair"] = 10000.0
-
                 best_bid, best_ask = self.get_best_bid_ask(order_depth)
-
                 if best_bid is None or best_ask is None:
                     result[product] = []
                     continue
@@ -240,100 +244,194 @@ class Trader:
                 best_ask_vol = -order_depth.sell_orders[best_ask]
 
                 mid_price = (best_bid + best_ask) / 2
-
-                # Microprice: slightly shifts fair toward the thinner side
-                total_top_vol = best_bid_vol + best_ask_vol
-                if total_top_vol > 0:
-                    micro_price = (best_ask * best_bid_vol + best_bid * best_ask_vol) / total_top_vol
-                else:
-                    micro_price = mid_price
-
-                # Rolling history
-                hist = traderObject["ash_mid_history"]
-                hist.append(mid_price)
-                if len(hist) > 40: # 40개가 최적 / history mean 말고 wall price avg도 시도해보기
-                    hist.pop(0)
-
-                rolling_mid = sum(hist) / len(hist)
-
-                # Blend stable fair + short-term book signal
-                raw_fair = 1.0 * rolling_mid + 0.0 * micro_price
-
-                # Inventory skew
-                # long -> lower fair so we sell more aggressively
-                # short -> higher fair so we buy more aggressively
-                inventory_skew = 0.04 * position # limit과 position에 대한 함수로?
-                fair_value = raw_fair - inventory_skew # 단위가 안맞지 않나..? 야매 같은데
-                traderObject["ash_last_fair"] = fair_value
-
                 spread = best_ask - best_bid
 
-                # Parameters
-                take_edge = 0.0
-                join_edge = 0.0
-                default_quote_size = 12
-                max_take_size = 20
+                # ---------- REAL position vs working position ----------
+                actual_pos = state.position.get(product, 0)
+                working_pos = actual_pos
 
-                # 1) Aggressively take clearly favorable quotes
-                for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
-                    if position >= limit:
-                        break
-                    if ask_price <= fair_value - take_edge:
-                        buy_qty = min(-ask_vol, limit - position, max_take_size)
-                        if buy_qty > 0:
-                            orders.append(Order(product, ask_price, buy_qty))
-                            position += buy_qty
+                # history: recent 20 mids
+                hist = traderObject["ash_mid_history"]
+                hist.append(mid_price)
+                if len(hist) > 20:
+                    hist.pop(0)
 
-                for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
-                    if position <= -limit:
-                        break
-                    if bid_price >= fair_value + take_edge:
-                        sell_qty = min(bid_vol, limit + position, max_take_size)
-                        if sell_qty > 0:
-                            orders.append(Order(product, bid_price, -sell_qty))
-                            position -= sell_qty
+                fair_value = sum(hist) / len(hist)
 
-                # 2) Passive market making
-                # position-aware sizes
-                buy_capacity = limit - position
-                sell_capacity = limit + position
-
-                buy_size = min(default_quote_size, max(0, buy_capacity))
-                sell_size = min(default_quote_size, max(0, sell_capacity))
-
-                # reduce same-direction quoting if inventory is already large
-                # +-50을 기준으로 잡아두면 너무 확확 꺾일듯. (limit-position)에 대한 함수로 만들 수 있을 것 같음
-                if position > 50:
-                    buy_size = min(buy_size, 3)
-                    sell_size = min(sell_size, 20)
-                elif position < -50:
-                    sell_size = min(sell_size, 3)
-                    buy_size = min(buy_size, 20)
-
-                # quote placement
-                if spread >= 2:
-                    bid_quote = min(best_bid + 1, math.floor(fair_value - join_edge))
-                    ask_quote = max(best_ask - 1, math.ceil(fair_value + join_edge))
+                if len(hist) >= 5:
+                    mean_hist = fair_value
+                    variance = sum((x - mean_hist) ** 2 for x in hist) / len(hist)
+                    vol = math.sqrt(variance)
                 else:
-                    bid_quote = math.floor(fair_value - 1)
-                    ask_quote = math.ceil(fair_value + 1)
+                    vol = 1.0
+                vol = max(vol, 1.0)
 
-                # make sure not to cross unintentionally
+                z_mid = (mid_price - fair_value) / vol
+                z_ask = (best_ask - fair_value) / vol
+                z_bid = (best_bid - fair_value) / vol
+
+                orders = []
+
+                # working capacity only for order submission safety
+                buy_remaining = limit - working_pos
+                sell_remaining = limit + working_pos
+
+                def place_buy(price: int, qty: int, reason: str):
+                    nonlocal working_pos, buy_remaining, sell_remaining, orders
+                    qty = max(0, min(qty, buy_remaining))
+                    if qty > 0:
+                        orders.append(Order(product, price, qty))
+                        working_pos += qty
+                        buy_remaining = limit - working_pos
+                        sell_remaining = limit + working_pos
+                        logger.print(
+                            f"[ASHDBG] ts={state.timestamp} action=BUY reason={reason} "
+                            f"px={price} qty={qty} actual_before={actual_pos} working_after={working_pos}"
+                        )
+                        return qty
+                    return 0
+
+                def place_sell(price: int, qty: int, reason: str):
+                    nonlocal working_pos, buy_remaining, sell_remaining, orders
+                    qty = max(0, min(qty, sell_remaining))
+                    if qty > 0:
+                        orders.append(Order(product, price, -qty))
+                        working_pos -= qty
+                        buy_remaining = limit - working_pos
+                        sell_remaining = limit + working_pos
+                        logger.print(
+                            f"[ASHDBG] ts={state.timestamp} action=SELL reason={reason} "
+                            f"px={price} qty={qty} actual_before={actual_pos} working_after={working_pos}"
+                        )
+                        return qty
+                    return 0
+
+                # =====================================================
+                # 1) stale quote capture
+                # =====================================================
+                stale_threshold = 1.2
+                stale_take_size = 20
+
+                if z_ask <= -stale_threshold and buy_remaining > 0:
+                    place_buy(best_ask, min(best_ask_vol, stale_take_size), "STALE_ASK")
+
+                if z_bid >= stale_threshold and sell_remaining > 0:
+                    place_sell(best_bid, min(best_bid_vol, stale_take_size), "STALE_BID")
+
+                # =====================================================
+                # 2) target position from z-score
+                # IMPORTANT: target is interpreted against ACTUAL position
+                # =====================================================
+                target_strength = 10.0
+                max_target = 40
+
+                target_position = int(round(-target_strength * z_mid))
+                target_position = max(-max_target, min(max_target, target_position))
+
+                # gap based on actual position, not working position
+                inventory_gap = target_position - actual_pos
+
+                # =====================================================
+                # 3) mean-reversion taker layer
+                # =====================================================
+                mr_entry_threshold = 0.6
+                taker_size = 10
+
+                if inventory_gap > 0 and z_ask <= -mr_entry_threshold and buy_remaining > 0:
+                    qty = min(best_ask_vol, taker_size, inventory_gap)
+                    place_buy(best_ask, qty, "MR_TAKER_BUY")
+
+                if inventory_gap < 0 and z_bid >= mr_entry_threshold and sell_remaining > 0:
+                    qty = min(best_bid_vol, taker_size, -inventory_gap)
+                    place_sell(best_bid, qty, "MR_TAKER_SELL")
+
+                # recompute working-gap for order submission,
+                # but keep actual_gap separately for diagnosis
+                working_gap = target_position - working_pos
+
+                # =====================================================
+                # 4) target-seeking passive quoting
+                # =====================================================
+                min_size = 2
+                max_size = 16
+
+                # size from ACTUAL gap magnitude
+                gap_mag = min(abs(inventory_gap), max_target)
+                base_size = int(round(min_size + (max_size - min_size) * gap_mag / max_target))
+
+                buy_size = 0
+                sell_size = 0
+                bid_quote = best_bid
+                ask_quote = best_ask
+
+                if spread >= 2:
+                    # strongly directional / one-sided when far from target
+                    if inventory_gap >= 15:
+                        # need more long: aggressive bid, minimal ask
+                        bid_quote = best_bid + 1
+                        ask_quote = best_ask
+                        buy_size = base_size
+                        sell_size = 0
+
+                    elif inventory_gap <= -15:
+                        # need more short: aggressive ask, minimal bid
+                        bid_quote = best_bid
+                        ask_quote = best_ask - 1
+                        buy_size = 0
+                        sell_size = base_size
+
+                    else:
+                        # near target: two-sided market making, but slightly tilted
+                        bid_quote = best_bid + 1
+                        ask_quote = best_ask - 1
+
+                        if inventory_gap > 0:
+                            buy_size = max(min_size, base_size)
+                            sell_size = min_size
+                        elif inventory_gap < 0:
+                            buy_size = min_size
+                            sell_size = max(min_size, base_size)
+                        else:
+                            buy_size = min_size
+                            sell_size = min_size
+                else:
+                    bid_quote = best_bid
+                    ask_quote = best_ask
+
+                    if inventory_gap > 0:
+                        buy_size = max(min_size, base_size // 2)
+                        sell_size = 0
+                    elif inventory_gap < 0:
+                        buy_size = 0
+                        sell_size = max(min_size, base_size // 2)
+                    else:
+                        buy_size = min_size
+                        sell_size = min_size
+
+                # safety checks
                 if bid_quote >= best_ask:
-                    bid_quote = best_ask - 1
+                    bid_quote = best_bid
                 if ask_quote <= best_bid:
-                    ask_quote = best_bid + 1
+                    ask_quote = best_ask
+
+                buy_size = min(buy_size, buy_remaining)
+                sell_size = min(sell_size, sell_remaining)
 
                 if buy_size > 0 and bid_quote < best_ask:
-                    orders.append(Order(product, bid_quote, buy_size))
+                    place_buy(bid_quote, buy_size, "PASSIVE_BID")
 
                 if sell_size > 0 and ask_quote > best_bid:
-                    orders.append(Order(product, ask_quote, -sell_size))
+                    place_sell(ask_quote, sell_size, "PASSIVE_ASK")
 
                 logger.print(
-                    f"ASH pos={position}, bb={best_bid}, ba={best_ask}, mid={mid_price:.1f}, "
-                    f"micro={micro_price:.2f}, fair={fair_value:.2f}, "
-                    f"bid_q={bid_quote}, ask_q={ask_quote}"
+                    f"[ASHDBG] ts={state.timestamp} "
+                    f"actual_pos={actual_pos} working_pos={working_pos} target={target_position} "
+                    f"actual_gap={inventory_gap} working_gap={working_gap} "
+                    f"mid={mid_price:.2f} fair={fair_value:.2f} vol={vol:.2f} "
+                    f"z_mid={z_mid:.2f} z_ask={z_ask:.2f} z_bid={z_bid:.2f} "
+                    f"bb={best_bid} ba={best_ask} bid_q={bid_quote} ask_q={ask_quote} "
+                    f"buy_sz={buy_size} sell_sz={sell_size} "
+                    f"buy_rem={buy_remaining} sell_rem={sell_remaining}"
                 )
 
             result[product] = orders
