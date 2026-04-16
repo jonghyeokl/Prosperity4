@@ -142,7 +142,7 @@ class Trader:
         75,
         80,
     ]  # alpha1 ~ alpha10
-    ASH_MIN_HISTORY_LENGTH = 1
+    ASH_MIN_HISTORY_LENGTH = 4
     ASH_MAX_HISTORY_LENGTH = 5
 
     def get_best_bid_ask(self, order_depth: OrderDepth):
