@@ -1,3 +1,4 @@
+import os
 from datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List, Any
 import json
@@ -126,9 +127,9 @@ class Trader:
 
     VALID_BID_ASK_VOLUME = 10
 
-    PEPPER_HISTORY_LENGTH = 39
-    PEPPER_MUST_SELL_BUY_COEFF = 0.355
-    PEPPER_ALPHA = 9
+    PEPPER_HISTORY_LENGTH = int(os.getenv("PEPPER_HISTORY_LENGTH", "99"))
+    PEPPER_MUST_SELL_BUY_COEFF = float(os.getenv("PEPPER_MUST_SELL_BUY_COEFF", "0.33"))
+    PEPPER_ALPHA = int(os.getenv("PEPPER_ALPHA", "9"))
 
     ASH_ALPHA = [
         -80
