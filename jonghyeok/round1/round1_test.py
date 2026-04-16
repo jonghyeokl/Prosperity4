@@ -124,15 +124,17 @@ class Trader:
         "INTARIAN_PEPPER_ROOT": 80,
     }
 
+    VALID_BID_ASK_VOLUME = 10
+
     PEPPER_HISTORY_LENGTH = 99
     PEPPER_MUST_SELL_BUY_COEFF = 0.33
     PEPPER_ALPHA = 9
 
-    ASH_EMA_WINDOW = 110
-    ASH_EMA_ALPHA = 2 / (ASH_EMA_WINDOW + 1)   # 여기만 바꾸면 custom alpha로도 교체 가능
-    ASH_EPSILON = 0.65                          # 백테스트 파라미터
-    ASH_BOUNCE_INTERCEPT = 0.008043
-    ASH_BOUNCE_SLOPE = -0.496676
+    # ASH_EMA_WINDOW = 110
+    # ASH_EMA_ALPHA = 2 / (ASH_EMA_WINDOW + 1)   # 여기만 바꾸면 custom alpha로도 교체 가능
+    # ASH_EPSILON = 0.65                          # 백테스트 파라미터
+    # ASH_BOUNCE_INTERCEPT = 0.008043
+    # ASH_BOUNCE_SLOPE = -0.496676
 
     def get_best_bid_ask(self, order_depth: OrderDepth):
         best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
@@ -144,6 +146,19 @@ class Trader:
         if best_bid is not None and best_ask is not None:
             return (best_bid + best_ask) / 2
         return None
+    
+    def get_best_valid_bid_ask(self, order_depth: OrderDepth):
+        best_valid_bid = None
+        best_valid_ask = None
+        for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
+            if bid_vol >= self.VALID_BID_ASK_VOLUME:
+                best_valid_bid = bid_price
+                break
+        for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
+            if -ask_vol >= self.VALID_BID_ASK_VOLUME:
+                best_valid_ask = ask_price
+                break
+        return best_valid_bid, best_valid_ask
 
     def run(self, state: TradingState):
 
@@ -256,13 +271,17 @@ class Trader:
                 best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
                 best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
 
-                mid_price = (best_bid + best_ask) / 2 if best_bid is not None and best_ask is not None else None
+                best_valid_bid, best_valid_ask = self.get_best_valid_bid_ask(order_depth)
 
-                if mid_price is None:
-                    if best_bid is not None:
-                        mid_price = best_bid + 8
-                    elif best_ask is not None:
-                        mid_price = best_ask - 8
+                # mid_price = (best_bid + best_ask) / 2 if best_bid is not None and best_ask is not None else None
+
+                valid_mid_price = (best_valid_bid + best_valid_ask) / 2 if best_valid_bid is not None and best_valid_ask is not None else None
+
+                # if mid_price is None:
+                #     if best_bid is not None:
+                #         mid_price = best_bid + 8
+                #     elif best_ask is not None:
+                #         mid_price = best_ask - 8
 
                 fair_price = None
 
@@ -334,12 +353,12 @@ class Trader:
                             sell_make_price = math.ceil(fair_price + z_score_threshold)
                         orders.append(Order(product, sell_make_price, -make_sell_qty))
                 
-                if mid_price is not None:
+                if valid_mid_price is not None:
                     if len(past_few_mid_history) < max_history_length:
-                        past_few_mid_history.append(mid_price)
+                        past_few_mid_history.append(valid_mid_price)
                     else:
                         past_few_mid_history.pop(0)
-                        past_few_mid_history.append(mid_price)
+                        past_few_mid_history.append(valid_mid_price)
 
             result[product] = orders
         

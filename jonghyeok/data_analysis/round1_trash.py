@@ -47,6 +47,8 @@ for csv_path in csv_paths:
                 if ask_volume_1 not in bid_ask_volume_map:
                     bid_ask_volume_map[ask_volume_1] = 0
                 bid_ask_volume_map[ask_volume_1] += 1
+            if ask_volume_1 == 9:
+                print(order['day'], order['timestamp']);
 
 print(sorted(bid_ask_volume_map.items(), key=lambda x: x[0], reverse=False));
 
