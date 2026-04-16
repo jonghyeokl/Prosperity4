@@ -1,4 +1,3 @@
-import os
 from datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List, Any
 import json
@@ -127,18 +126,15 @@ class Trader:
 
     VALID_BID_ASK_VOLUME = 10
 
-    ASH_ALPHA = [
-        int(os.getenv("ASH_ALPHA_1", "-75")),
-        int(os.getenv("ASH_ALPHA_2", "-50")),
-        int(os.getenv("ASH_ALPHA_3", "-40")),
-        int(os.getenv("ASH_ALPHA_4", "-20")),
-        int(os.getenv("ASH_ALPHA_5", "-10")),
-        int(os.getenv("ASH_ALPHA_6", "0")),
-        int(os.getenv("ASH_ALPHA_7", "10")),
-        int(os.getenv("ASH_ALPHA_8", "20")),
-        int(os.getenv("ASH_ALPHA_9", "30")),
-        int(os.getenv("ASH_ALPHA_10", "40")),
-    ]  # alpha1 ~ alpha10
+    PEPPER_HISTORY_LENGTH = 99
+    PEPPER_MUST_SELL_BUY_COEFF = 0.33
+    PEPPER_ALPHA = 9
+
+    # ASH_EMA_WINDOW = 110
+    # ASH_EMA_ALPHA = 2 / (ASH_EMA_WINDOW + 1)   # 여기만 바꾸면 custom alpha로도 교체 가능
+    # ASH_EPSILON = 0.65                          # 백테스트 파라미터
+    # ASH_BOUNCE_INTERCEPT = 0.008043
+    # ASH_BOUNCE_SLOPE = -0.496676
 
     def get_best_bid_ask(self, order_depth: OrderDepth):
         best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
@@ -150,13 +146,6 @@ class Trader:
         if best_bid is not None and best_ask is not None:
             return (best_bid + best_ask) / 2
         return None
-    
-    def get_zscore_threshold(self, quantity: int, limit: int):
-        interval = len(self.ASH_ALPHA)
-        # interval 0 ~ 10 => zscore_threshold -1.5 ~ 3.5
-        while interval > 0 and self.ASH_ALPHA[interval - 1] > quantity:
-            interval -= 1
-        return -1.5 + interval * 0.5
     
     def get_best_valid_bid_ask(self, order_depth: OrderDepth):
         best_valid_bid = None
@@ -193,18 +182,87 @@ class Trader:
             sell_limit = limit + position
 
             if product == "INTARIAN_PEPPER_ROOT":
-                pass
+                # initial state
+                if "intarian_pepper_root_last_ask_price_history" not in traderObject:
+                    traderObject["intarian_pepper_root_last_ask_price_history"] = []
+                if "intarian_pepper_root_last_bid_price_history" not in traderObject:
+                    traderObject["intarian_pepper_root_last_bid_price_history"] = []
+                
+                beginning_never_trade = False
+                if len(traderObject["intarian_pepper_root_last_ask_price_history"]) < 1:
+                    beginning_never_trade = True
+                
+                fair_value_coeff = 1 - self.PEPPER_MUST_SELL_BUY_COEFF * pow(((limit + position) / (limit * 2)) , self.PEPPER_ALPHA)
+                # get fair value
+                avg_ask_price = sum(traderObject["intarian_pepper_root_last_ask_price_history"]) / len(traderObject["intarian_pepper_root_last_ask_price_history"]) if len(traderObject["intarian_pepper_root_last_ask_price_history"]) > 0 else 0
+                fair_ask_value = (avg_ask_price + 0.1 * (len(traderObject["intarian_pepper_root_last_ask_price_history"]) + 1)/2 + 0.1) if avg_ask_price != 0 else 0
+                avg_bid_price = sum(traderObject["intarian_pepper_root_last_bid_price_history"]) / len(traderObject["intarian_pepper_root_last_bid_price_history"]) if len(traderObject["intarian_pepper_root_last_bid_price_history"]) > 0 else 0
+                fair_bid_value = (avg_bid_price + 0.1 * (len(traderObject["intarian_pepper_root_last_bid_price_history"]) + 1)/2 + 0.1) if avg_bid_price != 0 else 0
+                fair_price = (fair_ask_value * fair_value_coeff + fair_bid_value * (1 - fair_value_coeff)) if (fair_ask_value != 0 and fair_bid_value != 0) else 0
+                # calculate mid price
+                best_ask_price = min(order_depth.sell_orders.keys()) if (order_depth.sell_orders and any(order_depth.sell_orders.values())) else 0
+                best_bid_price = max(order_depth.buy_orders.keys()) if (order_depth.buy_orders and any(order_depth.buy_orders.values())) else 0
+                # save last self.PEPPER_HISTORY_LENGTH prices
+                if best_ask_price != 0:
+                    if len(traderObject["intarian_pepper_root_last_ask_price_history"]) < self.PEPPER_HISTORY_LENGTH:
+                        traderObject["intarian_pepper_root_last_ask_price_history"].append(best_ask_price)
+                    else:
+                        traderObject["intarian_pepper_root_last_ask_price_history"].pop(0)
+                        traderObject["intarian_pepper_root_last_ask_price_history"].append(best_ask_price)
+                if best_bid_price != 0:
+                    if len(traderObject["intarian_pepper_root_last_bid_price_history"]) < self.PEPPER_HISTORY_LENGTH:
+                        traderObject["intarian_pepper_root_last_bid_price_history"].append(best_bid_price)
+                    else:
+                        traderObject["intarian_pepper_root_last_bid_price_history"].pop(0)
+                        traderObject["intarian_pepper_root_last_bid_price_history"].append(best_bid_price)
+                # Trend: +1000/day linear. Buy and hold max long
+                # 1000 / 1000000 timestamp => 0.1 / 100 timestamp
+                if order_depth.sell_orders:
+                    for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
+                        if position < limit:
+                            if not beginning_never_trade and ask_price <= fair_price:
+                                buy_qty = min(-ask_vol, limit - position)
+                                if buy_qty > 0:
+                                    orders.append(Order(product, ask_price, buy_qty))
+                                    position += buy_qty
+                                    buy_limit -= buy_qty
+                if order_depth.buy_orders:
+                    for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
+                        if position > -limit:
+                            if not beginning_never_trade and bid_price >= fair_price:
+                                sell_qty = min(bid_vol, limit + position)
+                                if sell_qty > 0:
+                                    orders.append(Order(product, bid_price, -sell_qty))
+                                    position -= sell_qty
+                                    sell_limit -= sell_qty
+                
+                if position < limit and not beginning_never_trade:
+                    best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
+                    if best_bid is not None and best_bid + 1 <= fair_price:
+                        orders.append(Order(product, best_bid + 1, min(buy_limit, limit - position)))
+                    else:
+                        orders.append(Order(product, math.floor(fair_price), min(buy_limit, limit - position)))
+                
+                if position > -limit and not beginning_never_trade:
+                    best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
+                    if best_ask is not None and best_ask - 1 >= fair_price:
+                        orders.append(Order(product, best_ask - 1, max(-sell_limit, -limit - position)))
+                    else:
+                        orders.append(Order(product, math.ceil(fair_price), max(-sell_limit, -limit - position)))
 
             elif product == "ASH_COATED_OSMIUM":
-                
+                ema_key = "ash_coated_osmium_ema"
+                prev_mid_key = "ash_coated_osmium_prev_mid"
                 past_few_mid_history_key = "ash_coated_osmium_past_few_mid_history"
 
                 min_history_length = 1
                 max_history_length = 5
-                
-                z_score_threshold_for_bid = self.get_zscore_threshold(position, limit)
-                z_score_threshold_for_ask = self.get_zscore_threshold(-position, limit)
+                z_score_threshold = 0
 
+                if ema_key not in traderObject:
+                    traderObject[ema_key] = None
+                if prev_mid_key not in traderObject:
+                    traderObject[prev_mid_key] = None
                 if past_few_mid_history_key not in traderObject:
                     traderObject[past_few_mid_history_key] = []
                 
@@ -245,8 +303,14 @@ class Trader:
                     # --------------------
                     if order_depth.sell_orders:
                         for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
-                            if ask_price <= fair_price - z_score_threshold_for_bid and buy_limit > 0:
+                            if ask_price <= fair_price - z_score_threshold and buy_limit > 0:
                                 buy_qty = min(-ask_vol, buy_limit)
+                                if buy_qty > 0:
+                                    orders.append(Order(product, ask_price, buy_qty))
+                                    position += buy_qty
+                                    buy_limit -= buy_qty
+                            elif ask_price <= fair_price and buy_limit > 0:
+                                buy_qty = min(-position, min(-ask_vol, buy_limit))
                                 if buy_qty > 0:
                                     orders.append(Order(product, ask_price, buy_qty))
                                     position += buy_qty
@@ -254,8 +318,14 @@ class Trader:
 
                     if order_depth.buy_orders:
                         for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
-                            if bid_price >= fair_price + z_score_threshold_for_ask and sell_limit > 0:
+                            if bid_price >= fair_price + z_score_threshold and sell_limit > 0:
                                 sell_qty = min(bid_vol, sell_limit)
+                                if sell_qty > 0:
+                                    orders.append(Order(product, bid_price, -sell_qty))
+                                    position -= sell_qty
+                                    sell_limit -= sell_qty
+                            elif bid_price >= fair_price and sell_limit > 0:
+                                sell_qty = min(position, min(bid_vol, sell_limit))
                                 if sell_qty > 0:
                                     orders.append(Order(product, bid_price, -sell_qty))
                                     position -= sell_qty
@@ -271,16 +341,16 @@ class Trader:
 
                     if make_buy_qty > 0:
                         if best_bid is not None:
-                            buy_make_price = min(best_bid + 1, math.floor(fair_price - z_score_threshold_for_bid))
+                            buy_make_price = min(best_bid + 1, math.floor(fair_price - z_score_threshold))
                         else:
-                            buy_make_price = math.floor(fair_price - z_score_threshold_for_bid)
+                            buy_make_price = math.floor(fair_price - z_score_threshold)
                         orders.append(Order(product, buy_make_price, make_buy_qty))
 
                     if make_sell_qty > 0:
                         if best_ask is not None:
-                            sell_make_price = max(best_ask - 1, math.ceil(fair_price + z_score_threshold_for_ask))
+                            sell_make_price = max(best_ask - 1, math.ceil(fair_price + z_score_threshold))
                         else:
-                            sell_make_price = math.ceil(fair_price + z_score_threshold_for_ask)
+                            sell_make_price = math.ceil(fair_price + z_score_threshold)
                         orders.append(Order(product, sell_make_price, -make_sell_qty))
                 
                 if valid_mid_price is not None:
