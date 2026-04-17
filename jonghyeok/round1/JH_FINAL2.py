@@ -131,7 +131,7 @@ class Trader:
     PEPPER_ALPHA = 9
 
     ASH_ALPHA = [
-        -80
+        -80,
         -75,
         -20,
         0,
