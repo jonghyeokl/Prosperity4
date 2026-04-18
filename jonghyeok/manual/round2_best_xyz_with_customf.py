@@ -79,11 +79,68 @@ for row in results[:10]:
 
 
 # =========================
-# 5. z - S*(z) 그래프
+# 5. 그래프용 데이터
 # =========================
 z_vals = [row["z"] for row in results]
+f_vals = [row["f_z"] for row in results]
 S_vals = [row["S_opt"] for row in results]
 
+# f(z)-f(z-1)
+delta_z_vals = list(range(1, 101))
+delta_f_vals = [f(z) - f(z - 1) for z in delta_z_vals]
+
+
+# =========================
+# 6. 그래프 1: f(z)
+# =========================
+target_f = 0.4
+
+# f(z)가 target_f와 가장 가까운 z 찾기
+closest_idx = min(range(len(f_vals)), key=lambda i: abs(f_vals[i] - target_f))
+z_at_target = z_vals[closest_idx]
+f_at_target = f_vals[closest_idx]
+
+plt.figure(figsize=(8, 5))
+plt.plot(z_vals, f_vals, marker="o", markersize=3, label="f(z)")
+
+# f(z)=0.4 수평선
+plt.axhline(target_f, linestyle="--", alpha=0.7, label=f"f(z) = {target_f}")
+
+# 가장 가까운 점 표시
+plt.scatter([z_at_target], [f_at_target], s=60, marker="x")
+plt.annotate(
+    f"closest point\nz={z_at_target}, f(z)={f_at_target:.6f}",
+    (z_at_target, f_at_target),
+    xytext=(8, 8),
+    textcoords="offset points",
+    fontsize=9,
+)
+
+plt.xlabel("z")
+plt.ylabel("f(z)")
+plt.title("Custom f(z)")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+# =========================
+# 7. 그래프 2: f(z)-f(z-1)
+# =========================
+plt.figure(figsize=(8, 5))
+plt.plot(delta_z_vals, delta_f_vals, marker="o", markersize=3)
+plt.xlabel("z")
+plt.ylabel("f(z) - f(z-1)")
+plt.title("Increment of f(z)")
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+
+# =========================
+# 8. 그래프 3: S*(z)
+# =========================
 plt.figure(figsize=(8, 5))
 plt.plot(z_vals, S_vals, marker="o", markersize=3)
 plt.axvline(global_best["z"], linestyle="--", alpha=0.7)
