@@ -124,7 +124,7 @@ def S_value(x: int, y: int, z: int) -> float:
 # =========================
 # 3. 각 z에 대해 최적 (x, y) 찾기
 # =========================
-results = []  # 각 원소: dict(z=..., x=..., y=..., S=...)
+results = []
 
 for z in range(0, 101):
     fz = f(z)
@@ -138,7 +138,7 @@ for z in range(0, 101):
     remaining = 100 - z
     for x in range(0, remaining + 1):
         for y in range(0, remaining - x + 1):
-            S = C * math.log(1 + x) * y * (0.1 + fz) - 500 * (x + y + z)
+            S = S_value(x, y, z)
             if S > best_S:
                 best_S = S
                 best_x = x
@@ -183,7 +183,6 @@ z_vals = [row["z"] for row in results]
 f_vals = [row["f_z"] for row in results]
 S_vals = [row["S_opt"] for row in results]
 
-# f(z)-f(z-1)
 delta_z_vals = list(range(1, 101))
 delta_f_vals = [f(z) - f(z - 1) for z in delta_z_vals]
 
@@ -193,18 +192,13 @@ delta_f_vals = [f(z) - f(z - 1) for z in delta_z_vals]
 # =========================
 target_f = 0.4
 
-# f(z)가 target_f와 가장 가까운 z 찾기
 closest_idx = min(range(len(f_vals)), key=lambda i: abs(f_vals[i] - target_f))
 z_at_target = z_vals[closest_idx]
 f_at_target = f_vals[closest_idx]
 
 plt.figure(figsize=(8, 5))
 plt.plot(z_vals, f_vals, marker="o", markersize=3, label="f(z)")
-
-# f(z)=0.4 수평선
 plt.axhline(target_f, linestyle="--", alpha=0.7, label=f"f(z) = {target_f}")
-
-# 가장 가까운 점 표시
 plt.scatter([z_at_target], [f_at_target], s=60, marker="x")
 plt.annotate(
     f"closest point\nz={z_at_target}, f(z)={f_at_target:.6f}",
