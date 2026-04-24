@@ -203,11 +203,9 @@ class Trader:
     }
 
     # ----- Rolling smile fit -----
-    # 각 voucher 당 저장할 tick 수 (환경변수 SMILE_WINDOW 로 오버라이드 가능)
-    import os as _os
-    SMILE_WINDOW_PER_VOUCHER = int(_os.environ.get("SMILE_WINDOW", "50"))
-    # 총 점 수 이 값 이상일 때만 rolling fit 사용 (SMILE_WINDOW_PER_VOUCHER * num_vouchers 보다 작아야 함)
-    SMILE_MIN_POINTS_FOR_FIT = max(20, SMILE_WINDOW_PER_VOUCHER // 2 * 4)
+    SMILE_WINDOW_PER_VOUCHER = 300   # 각 voucher 당 저장할 tick 수
+    SMILE_MIN_POINTS_FOR_FIT = 600   # 총 점수 이상일 때만 rolling fit 사용
+
 
     # ----- Fallback smile (rolling warmup 중) -----
     # 5000~5300 pooled fit (실제는 rolling 로 대체되지만 초기 fallback)
@@ -222,7 +220,9 @@ class Trader:
         "VEV_5300": 5, "VEV_5400": 5, "VEV_5500": 5,
     }
 
-    TTE_BASE_DAYS = 8.0
+    # 실전 Round 3 시작 시 TTE = 5 days (problem spec).
+    # 히스토리 day 2 가 TTE=6d 이었으니 실전은 그 하루 뒤.
+    TTE_BASE_DAYS = 5.0
     DAYS_PER_YEAR = 365.0
 
     THEO_DIFF_WINDOW = 20
@@ -285,8 +285,8 @@ class Trader:
             sell_limit -= volume
         return sell_limit
 
-    def compute_tte_years(self, timestamp: int, day_num: int) -> float:
-        elapsed = day_num + timestamp / 1_000_000.0
+    def compute_tte_years(self, timestamp: int) -> float:
+        elapsed = timestamp / 1_000_000.0
         tte_days = max(self.TTE_BASE_DAYS - elapsed, 1e-9)
         return tte_days / self.DAYS_PER_YEAR
 
@@ -303,7 +303,7 @@ class Trader:
     #  Rolling smile fit
     # ==========================================================
     def update_smile_history_and_fit(
-        self, state: TradingState, traderObject: dict, day_num: int,
+        self, state: TradingState, traderObject: dict,
     ) -> Tuple[Optional[Tuple[float, float, float]], float, float]:
         """
         Per voucher history 에 (m, iv) 추가 후 전체 point 로 fit.
@@ -317,7 +317,7 @@ class Trader:
         S_mid = self.get_valid_mid(und_od, und_vol)
         if S_mid is None:
             return None, 0.0, 0.0
-        T = self.compute_tte_years(state.timestamp, day_num)
+        T = self.compute_tte_years(state.timestamp)
         if T <= 0:
             return None, S_mid, T
 
@@ -370,7 +370,7 @@ class Trader:
 
     # ==========================================================
     def get_atm_orders(self, product: str, state: TradingState,
-                       traderObject: dict, day_num: int,
+                       traderObject: dict,
                        rolling_coefs: Optional[Tuple[float, float, float]],
                        S_mid: float, T: float) -> List[Order]:
         orders: List[Order] = []
@@ -447,7 +447,7 @@ class Trader:
 
         return orders
 
-    def run(self, state: TradingState, day_num: int = 0):
+    def run(self, state: TradingState):
         original_state = copy.deepcopy(state)
 
         traderObject = {}
@@ -461,7 +461,7 @@ class Trader:
 
         # ----- 공통: rolling smile fit -----
         rolling_coefs, S_mid, T = self.update_smile_history_and_fit(
-            state, traderObject, day_num,
+            state, traderObject,
         )
 
         # ----- ATM voucher 별 signal -----
@@ -469,7 +469,7 @@ class Trader:
             if product not in state.order_depths:
                 continue
             orders = self.get_atm_orders(
-                product, state, traderObject, day_num,
+                product, state, traderObject,
                 rolling_coefs, S_mid, T,
             )
             if orders:
