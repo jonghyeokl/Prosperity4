@@ -22,8 +22,8 @@ DAY_LENGTH = 1_000_000
 IV_THRESHOLD = 0.4
 
 VALID_BID_ASK_VOLUME = {
-    "VELVETFRUIT_EXTRACT": 30,
-    "VEV_4000": 5,
+    "VELVETFRUIT_EXTRACT": 15,
+    "VEV_4000": 6,
 }
 
 DAY_RE = re.compile(r"day_(-?\d+)")
