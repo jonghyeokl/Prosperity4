@@ -31,15 +31,15 @@ VOUCHERS = {
 }
 
 VALID_BID_ASK_VOLUME = {
-    "VELVETFRUIT_EXTRACT": 30,
+    "VELVETFRUIT_EXTRACT": 15,
     "VEV_4000": 6,
     "VEV_4500": 6,
-    "VEV_5000": 13,
-    "VEV_5100": 13,
-    "VEV_5200": 13,
-    "VEV_5300": 13,
-    "VEV_5400": 13,
-    "VEV_5500": 13,
+    "VEV_5000": 6,
+    "VEV_5100": 6,
+    "VEV_5200": 6,
+    "VEV_5300": 5,
+    "VEV_5400": 5,
+    "VEV_5500": 5,
     "VEV_6000": 5,
     "VEV_6500": 5,
 }
