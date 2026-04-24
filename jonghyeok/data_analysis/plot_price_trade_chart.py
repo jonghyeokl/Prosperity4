@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
-DEFAULT_FILL_PRICE = 10000.0
+DEFAULT_FILL_PRICE = 0.0
 PRICE_COLUMNS = ["mid_price", "bid_price_1", "ask_price_1"]
 PRICE_FILE_PATTERN = "prices_round_*_day_*.csv"
 TRADE_FILE_PATTERN = "trades_round_*_day_*.csv"
