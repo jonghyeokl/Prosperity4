@@ -202,6 +202,12 @@ class Trader:
         "VEV_5300": 5300,
     }
 
+    # ----- Deep ITM vouchers: fair = S - K (대칭 take/make) -----
+    DEEP_ITM_VOUCHERS = {
+        "VEV_4000": 4000,
+        "VEV_4500": 4500,
+    }
+
     # ----- Rolling smile fit -----
     SMILE_WINDOW_PER_VOUCHER = 300   # 각 voucher 당 저장할 tick 수
     SMILE_MIN_POINTS_FOR_FIT = 600   # 총 점수 이상일 때만 rolling fit 사용
@@ -298,6 +304,63 @@ class Trader:
         new_val = alpha * value + (1.0 - alpha) * traderObject[key]
         traderObject[key] = new_val
         return new_val
+
+    # ==========================================================
+    #  Deep ITM voucher trading (종혁 스타일: fair = S - K, 대칭)
+    # ==========================================================
+    def get_deep_itm_voucher_orders(self, product: str, state: TradingState) -> List[Order]:
+        orders: List[Order] = []
+
+        if self.UNDERLYING not in state.order_depths:
+            return orders
+
+        voucher_depth = state.order_depths[product]
+        underlying_depth = state.order_depths[self.UNDERLYING]
+
+        underlying_mid = self.get_valid_mid(underlying_depth, 0)
+        if underlying_mid is None:
+            return orders
+
+        strike = self.DEEP_ITM_VOUCHERS[product]
+        fair = underlying_mid - strike
+        if fair <= 0:
+            return orders
+
+        best_bid, best_ask = self.get_best_bid_ask(voucher_depth)
+        if best_bid is None or best_ask is None:
+            return orders
+
+        position = state.position.get(product, 0)
+        limit = self.POSITION_LIMITS[product]
+        buy_limit = limit - position
+        sell_limit = limit + position
+
+        # 1. Take: 비싼 bid 에 팔기
+        for bid_price, bid_vol in sorted(voucher_depth.buy_orders.items(), reverse=True):
+            if bid_price > fair and sell_limit > 0:
+                sell_limit = self.add_sell_order(orders, product, bid_price, bid_vol, sell_limit)
+            else:
+                break
+
+        # 2. Take: 싼 ask 에 사기
+        for ask_price, ask_vol in sorted(voucher_depth.sell_orders.items()):
+            ask_qty = -ask_vol
+            if ask_price < fair and buy_limit > 0:
+                buy_limit = self.add_buy_order(orders, product, ask_price, ask_qty, buy_limit)
+            else:
+                break
+
+        # 3. Make: fair 아래 지정가 bid
+        buy_price = min(best_bid + 1, math.floor(fair - 0.1))
+        if buy_limit > 0 and buy_price < best_ask:
+            buy_limit = self.add_buy_order(orders, product, buy_price, buy_limit, buy_limit)
+
+        # 4. Make: fair 위 지정가 ask
+        sell_price = max(best_ask - 1, math.ceil(fair + 0.1))
+        if sell_limit > 0 and sell_price > best_bid:
+            sell_limit = self.add_sell_order(orders, product, sell_price, sell_limit, sell_limit)
+
+        return orders
 
     # ==========================================================
     #  Rolling smile fit
@@ -459,12 +522,18 @@ class Trader:
 
         result: dict = {}
 
-        # ----- 공통: rolling smile fit -----
+        # ----- Deep ITM (VEV_4000, 4500): fair = S - K 대칭 -----
+        for product in self.DEEP_ITM_VOUCHERS:
+            if product not in state.order_depths:
+                continue
+            orders = self.get_deep_itm_voucher_orders(product, state)
+            if orders:
+                result[product] = orders
+
+        # ----- ATM (VEV_5000~5300): rolling smile fit + IV scalping -----
         rolling_coefs, S_mid, T = self.update_smile_history_and_fit(
             state, traderObject,
         )
-
-        # ----- ATM voucher 별 signal -----
         for product in self.ATM_VOUCHERS:
             if product not in state.order_depths:
                 continue
