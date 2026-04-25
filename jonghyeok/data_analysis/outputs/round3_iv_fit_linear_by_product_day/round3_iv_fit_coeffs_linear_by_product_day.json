@@ -1,0 +1,369 @@
+{
+  "fit_type": "linear_by_product_day",
+  "formula": "fair_iv_product_day(m) = a*m + b",
+  "underlying": "VELVETFRUIT_EXTRACT",
+  "strikes": {
+    "VEV_5000": 5000,
+    "VEV_5100": 5100,
+    "VEV_5200": 5200,
+    "VEV_5300": 5300,
+    "VEV_5400": 5400,
+    "VEV_5500": 5500
+  },
+  "products": {
+    "VEV_5000": {
+      "day_0": {
+        "file_idx": 0,
+        "parsed_day": 0,
+        "file": "prices_round_3_day_0.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5000",
+        "K": 5000,
+        "a": -0.029559832852865585,
+        "b": 0.23162905877923162,
+        "coeffs": [
+          -0.029559832852865585,
+          0.23162905877923162
+        ],
+        "rmse": 0.003313914338553086,
+        "mae": 0.002628194401449855,
+        "r2": 0.0335838714769765,
+        "n": 10000
+      },
+      "day_1": {
+        "file_idx": 1,
+        "parsed_day": 1,
+        "file": "prices_round_3_day_1.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5000",
+        "K": 5000,
+        "a": 0.04030413417568215,
+        "b": 0.2555649482916338,
+        "coeffs": [
+          0.04030413417568215,
+          0.2555649482916338
+        ],
+        "rmse": 0.0044655650527390435,
+        "mae": 0.003587605474145572,
+        "r2": 0.04388971839800493,
+        "n": 10000
+      },
+      "day_2": {
+        "file_idx": 2,
+        "parsed_day": 2,
+        "file": "prices_round_3_day_2.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5000",
+        "K": 5000,
+        "a": 0.022203292727194013,
+        "b": 0.2525002054780899,
+        "coeffs": [
+          0.022203292727194013,
+          0.2525002054780899
+        ],
+        "rmse": 0.005466533320938341,
+        "mae": 0.004219453725232015,
+        "r2": 0.012575525164876256,
+        "n": 10000
+      }
+    },
+    "VEV_5100": {
+      "day_0": {
+        "file_idx": 0,
+        "parsed_day": 0,
+        "file": "prices_round_3_day_0.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5100",
+        "K": 5100,
+        "a": -0.08131261936200042,
+        "b": 0.2283163078555153,
+        "coeffs": [
+          -0.08131261936200042,
+          0.2283163078555153
+        ],
+        "rmse": 0.0023849040678582643,
+        "mae": 0.0019188863462032382,
+        "r2": 0.3077840499701481,
+        "n": 10000
+      },
+      "day_1": {
+        "file_idx": 1,
+        "parsed_day": 1,
+        "file": "prices_round_3_day_1.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5100",
+        "K": 5100,
+        "a": 0.007093697829993653,
+        "b": 0.23939858740493436,
+        "coeffs": [
+          0.007093697829993653,
+          0.23939858740493436
+        ],
+        "rmse": 0.0031940337763690916,
+        "mae": 0.0025969096053972238,
+        "r2": 0.002452693526827532,
+        "n": 10000
+      },
+      "day_2": {
+        "file_idx": 2,
+        "parsed_day": 2,
+        "file": "prices_round_3_day_2.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5100",
+        "K": 5100,
+        "a": -0.06761306118119736,
+        "b": 0.2200283749275716,
+        "coeffs": [
+          -0.06761306118119736,
+          0.2200283749275716
+        ],
+        "rmse": 0.002850950623436829,
+        "mae": 0.0022945206224446756,
+        "r2": 0.2879685026697434,
+        "n": 10000
+      }
+    },
+    "VEV_5200": {
+      "day_0": {
+        "file_idx": 0,
+        "parsed_day": 0,
+        "file": "prices_round_3_day_0.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5200",
+        "K": 5200,
+        "a": -0.020488579265835007,
+        "b": 0.238581145999394,
+        "coeffs": [
+          -0.020488579265835007,
+          0.238581145999394
+        ],
+        "rmse": 0.0031521180884677745,
+        "mae": 0.0026157949167210552,
+        "r2": 0.01428743131130239,
+        "n": 10000
+      },
+      "day_1": {
+        "file_idx": 1,
+        "parsed_day": 1,
+        "file": "prices_round_3_day_1.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5200",
+        "K": 5200,
+        "a": 0.03703102157689231,
+        "b": 0.24694428057526507,
+        "coeffs": [
+          0.03703102157689231,
+          0.24694428057526507
+        ],
+        "rmse": 0.001997243395775675,
+        "mae": 0.0015634328500637902,
+        "r2": 0.1354890891225049,
+        "n": 10000
+      },
+      "day_2": {
+        "file_idx": 2,
+        "parsed_day": 2,
+        "file": "prices_round_3_day_2.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5200",
+        "K": 5200,
+        "a": -0.049521758964405194,
+        "b": 0.23843952726069428,
+        "coeffs": [
+          -0.049521758964405194,
+          0.23843952726069428
+        ],
+        "rmse": 0.0023837280874772033,
+        "mae": 0.0018782324345868553,
+        "r2": 0.23258588427701476,
+        "n": 10000
+      }
+    },
+    "VEV_5300": {
+      "day_0": {
+        "file_idx": 0,
+        "parsed_day": 0,
+        "file": "prices_round_3_day_0.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5300",
+        "K": 5300,
+        "a": 0.0009602337470513055,
+        "b": 0.23981338381378228,
+        "coeffs": [
+          0.0009602337470513055,
+          0.23981338381378228
+        ],
+        "rmse": 0.0020002724038874916,
+        "mae": 0.0016742901754297661,
+        "r2": 7.319814715311956e-05,
+        "n": 10000
+      },
+      "day_1": {
+        "file_idx": 1,
+        "parsed_day": 1,
+        "file": "prices_round_3_day_1.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5300",
+        "K": 5300,
+        "a": 0.005845543480586348,
+        "b": 0.24703267553498162,
+        "coeffs": [
+          0.005845543480586348,
+          0.24703267553498162
+        ],
+        "rmse": 0.003322693530950819,
+        "mae": 0.0027423218374436585,
+        "r2": 0.001343064859977039,
+        "n": 10000
+      },
+      "day_2": {
+        "file_idx": 2,
+        "parsed_day": 2,
+        "file": "prices_round_3_day_2.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5300",
+        "K": 5300,
+        "a": -0.009064145674498626,
+        "b": 0.2481643830450649,
+        "coeffs": [
+          -0.009064145674498626,
+          0.2481643830450649
+        ],
+        "rmse": 0.0019371786428289885,
+        "mae": 0.0015569483698947492,
+        "r2": 0.015506924075181172,
+        "n": 10000
+      }
+    },
+    "VEV_5400": {
+      "day_0": {
+        "file_idx": 0,
+        "parsed_day": 0,
+        "file": "prices_round_3_day_0.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5400",
+        "K": 5400,
+        "a": 0.04823749858296083,
+        "b": 0.2196292681427081,
+        "coeffs": [
+          0.04823749858296083,
+          0.2196292681427081
+        ],
+        "rmse": 0.005305661830191473,
+        "mae": 0.004365082288684243,
+        "r2": 0.024628815260128722,
+        "n": 10000
+      },
+      "day_1": {
+        "file_idx": 1,
+        "parsed_day": 1,
+        "file": "prices_round_3_day_1.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5400",
+        "K": 5400,
+        "a": -0.009936035348146072,
+        "b": 0.2315269949822428,
+        "coeffs": [
+          -0.009936035348146072,
+          0.2315269949822428
+        ],
+        "rmse": 0.0022327637261296837,
+        "mae": 0.0018615429911109512,
+        "r2": 0.008505602655868194,
+        "n": 10000
+      },
+      "day_2": {
+        "file_idx": 2,
+        "parsed_day": 2,
+        "file": "prices_round_3_day_2.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5400",
+        "K": 5400,
+        "a": 0.021666621845288708,
+        "b": 0.22527770990136445,
+        "coeffs": [
+          0.021666621845288708,
+          0.22527770990136445
+        ],
+        "rmse": 0.002450114171537158,
+        "mae": 0.0019658504610792237,
+        "r2": 0.056713279880618805,
+        "n": 10000
+      }
+    },
+    "VEV_5500": {
+      "day_0": {
+        "file_idx": 0,
+        "parsed_day": 0,
+        "file": "prices_round_3_day_0.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5500",
+        "K": 5500,
+        "a": 0.04855836068684734,
+        "b": 0.23038323268592564,
+        "coeffs": [
+          0.04855836068684734,
+          0.23038323268592564
+        ],
+        "rmse": 0.0038340883987256105,
+        "mae": 0.003193391746055093,
+        "r2": 0.04676096791812201,
+        "n": 10000
+      },
+      "day_1": {
+        "file_idx": 1,
+        "parsed_day": 1,
+        "file": "prices_round_3_day_1.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5500",
+        "K": 5500,
+        "a": -0.032054122659628106,
+        "b": 0.26075593364150906,
+        "coeffs": [
+          -0.032054122659628106,
+          0.26075593364150906
+        ],
+        "rmse": 0.002875262905168125,
+        "mae": 0.0023714448015039204,
+        "r2": 0.05305378156924334,
+        "n": 10000
+      },
+      "day_2": {
+        "file_idx": 2,
+        "parsed_day": 2,
+        "file": "prices_round_3_day_2.csv",
+        "fit_type": "linear_by_product_day",
+        "formula": "fair_iv_product_day(m) = a*m + b",
+        "product": "VEV_5500",
+        "K": 5500,
+        "a": 0.01826831736663936,
+        "b": 0.24462105602312004,
+        "coeffs": [
+          0.01826831736663936,
+          0.24462105602312004
+        ],
+        "rmse": 0.003858411596706246,
+        "mae": 0.003186312395405849,
+        "r2": 0.018668200610378993,
+        "n": 10000
+      }
+    }
+  }
+}

@@ -364,10 +364,10 @@ def run_backtest(
 
         if print_output:
             with closing(Tee(stdout)):
-                orders, conversions, trader_data = trader.run(state)
+                orders, conversions, trader_data = trader.run(state, day_num)
         else:
             with redirect_stdout(stdout):
-                orders, conversions, trader_data = trader.run(state)
+                orders, conversions, trader_data = trader.run(state, day_num)
 
         sandbox_row = SandboxLogRow(
             timestamp=timestamp,
