@@ -2163,23 +2163,6 @@ class Trader:
         "VEV_5300": {"ema_window": 20, "beta": -0.986},
     }
 
-    # ==========================================================
-    # HYDROGEL - VELVET pair spread mean reversion
-    # spread = HYDROGEL - (PAIR_A * VELVET + PAIR_B)
-    # ==========================================================
-    PAIR_A = 0.197785
-    PAIR_B = 8952.426959
-
-    SPREAD_MEAN_WINDOW = 500
-    SPREAD_SCALE_WINDOW = 1000
-
-    OPEN_Z = 1.5
-    CLOSE_Z = 0.3
-
-    MAX_HYDROGEL_PAIR_POS = 200
-    HEDGE_RATIO = 5  # HYDROGEL 5 : VELVET 1
-
-    # ==========================================================
     def bid(self):
         return 0
 
@@ -2625,178 +2608,6 @@ class Trader:
 
         return orders
     
-        # ==========================================================
-    #  HYDROGEL - VELVET pair trading
-    # ==========================================================
-    def get_hydrogel_velvet_pair_orders(
-        self,
-        state: TradingState,
-        traderObject: dict,
-    ) -> Dict[str, List[Order]]:
-        pair_orders: Dict[str, List[Order]] = {
-            "HYDROGEL_PACK": [],
-            "VELVETFRUIT_EXTRACT": [],
-        }
-
-        h_product = "HYDROGEL_PACK"
-        v_product = "VELVETFRUIT_EXTRACT"
-
-        if h_product not in state.order_depths or v_product not in state.order_depths:
-            return pair_orders
-
-        h_depth = state.order_depths[h_product]
-        v_depth = state.order_depths[v_product]
-
-        h_mid = self.get_valid_mid_price(
-            h_depth,
-            self.VALID_BID_ASK_VOLUME[h_product],
-        )
-        v_mid = self.get_valid_mid_price(
-            v_depth,
-            self.VALID_BID_ASK_VOLUME[v_product],
-        )
-
-        if h_mid is None or v_mid is None:
-            return pair_orders
-
-        h_bid, h_ask = self.get_best_bid_ask(h_depth)
-        v_bid, v_ask = self.get_best_bid_ask(v_depth)
-
-        if h_bid is None or h_ask is None or v_bid is None or v_ask is None:
-            return pair_orders
-
-        spread = h_mid - (self.PAIR_A * v_mid + self.PAIR_B)
-
-        spread_mean = self.ema(
-            traderObject=traderObject,
-            key="pair_spread_mean",
-            value=spread,
-            window=self.SPREAD_MEAN_WINDOW,
-        )
-
-        residual = spread - spread_mean
-
-        spread_scale = self.ema(
-            traderObject=traderObject,
-            key="pair_spread_scale",
-            value=abs(residual),
-            window=self.SPREAD_SCALE_WINDOW,
-        )
-
-        traderObject["pair_spread_count"] = traderObject.get("pair_spread_count", 0) + 1
-
-        if spread_scale <= 1e-9 or not math.isfinite(spread_scale):
-            return pair_orders
-
-        z = residual / spread_scale
-
-        h_limit = self.POSITION_LIMITS[h_product]
-        v_limit = self.POSITION_LIMITS[v_product]
-
-        max_h = min(
-            self.MAX_HYDROGEL_PAIR_POS,
-            h_limit,
-            v_limit * self.HEDGE_RATIO,
-        )
-        max_h = (max_h // self.HEDGE_RATIO) * self.HEDGE_RATIO
-
-        if max_h <= 0:
-            return pair_orders
-
-        # target position
-        # spread > mean  => HYDROGEL expensive => short HYDROGEL, long VELVET
-        # spread < mean  => HYDROGEL cheap    => long HYDROGEL, short VELVET
-        target_h = None
-
-        if z > self.OPEN_Z:
-            target_h = -max_h
-        elif z < -self.OPEN_Z:
-            target_h = max_h
-        elif abs(z) <= self.CLOSE_Z:
-            target_h = 0
-
-        if target_h is None:
-            return pair_orders
-
-        target_v = -target_h // self.HEDGE_RATIO
-
-        h_pos = state.position.get(h_product, 0)
-        v_pos = state.position.get(v_product, 0)
-
-        h_need = target_h - h_pos
-        v_need = target_v - v_pos
-
-        threshold_z = self.CLOSE_Z if target_h == 0 else self.OPEN_Z
-        threshold = threshold_z * spread_scale
-
-        direction = None
-        pair_units_needed = 0
-
-        if h_need <= -self.HEDGE_RATIO and v_need >= 1:
-            direction = "short_h_long_v"
-            pair_units_needed = min((-h_need) // self.HEDGE_RATIO, v_need)
-
-        elif h_need >= self.HEDGE_RATIO and v_need <= -1:
-            direction = "long_h_short_v"
-            pair_units_needed = min(h_need // self.HEDGE_RATIO, -v_need)
-
-        if direction is None or pair_units_needed <= 0:
-            return pair_orders
-
-        # ------------------------------------------------------
-        # 1. Take
-        # ------------------------------------------------------
-        if direction == "short_h_long_v":
-            # Sell HYDROGEL at bid, buy VELVET at ask
-            executable_spread = h_bid - (self.PAIR_A * v_ask + self.PAIR_B)
-
-            if executable_spread >= spread_mean + threshold:
-                h_bid_vol = h_depth.buy_orders.get(h_bid, 0)
-                v_ask_vol = -v_depth.sell_orders.get(v_ask, 0)
-
-                take_units = min(
-                    pair_units_needed,
-                    h_bid_vol // self.HEDGE_RATIO,
-                    v_ask_vol,
-                )
-
-                if take_units > 0:
-                    h_qty = take_units * self.HEDGE_RATIO
-                    v_qty = take_units
-
-                    pair_orders[h_product].append(Order(h_product, int(h_bid), -int(h_qty)))
-                    pair_orders[v_product].append(Order(v_product, int(v_ask), int(v_qty)))
-
-                    pair_units_needed -= take_units
-
-        elif direction == "long_h_short_v":
-            # Buy HYDROGEL at ask, sell VELVET at bid
-            executable_spread = h_ask - (self.PAIR_A * v_bid + self.PAIR_B)
-
-            if executable_spread <= spread_mean - threshold:
-                h_ask_vol = -h_depth.sell_orders.get(h_ask, 0)
-                v_bid_vol = v_depth.buy_orders.get(v_bid, 0)
-
-                take_units = min(
-                    pair_units_needed,
-                    h_ask_vol // self.HEDGE_RATIO,
-                    v_bid_vol,
-                )
-
-                if take_units > 0:
-                    h_qty = take_units * self.HEDGE_RATIO
-                    v_qty = take_units
-
-                    pair_orders[h_product].append(Order(h_product, int(h_ask), int(h_qty)))
-                    pair_orders[v_product].append(Order(v_product, int(v_bid), -int(v_qty)))
-
-                    pair_units_needed -= take_units
-
-        # ------------------------------------------------------
-        # 2. Make
-        # Pair strategy is take-only.
-        # Do not place maker orders because one leg can be filled without the other.
-        return pair_orders
 
     def run(self, state: TradingState, day_num: int):
         original_state = copy.deepcopy(state)
@@ -2820,11 +2631,6 @@ class Trader:
             day_num=day_num,
         )
 
-        pair_orders = self.get_hydrogel_velvet_pair_orders(
-            state=state,
-            traderObject=traderObject,
-        )
-
         for product in state.order_depths:
             orders: List[Order] = []
 
@@ -2844,10 +2650,10 @@ class Trader:
                 )
 
             elif product == "HYDROGEL_PACK":
-                orders = pair_orders.get(product, [])
+                pass
 
             elif product == "VELVETFRUIT_EXTRACT":
-                orders = pair_orders.get(product, [])
+                pass
 
             result[product] = orders
 
