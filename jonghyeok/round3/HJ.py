@@ -2099,8 +2099,6 @@ class Trader:
         "VEV_5100": 5100,
         "VEV_5200": 5200,
         "VEV_5300": 5300,
-        "VEV_5400": 5400,
-        "VEV_5500": 5500,
     }
 
     # IV curve fitting에는 결과가 가장 좋았던 VEV_5000~VEV_5500 사용
@@ -2112,6 +2110,12 @@ class Trader:
         "VEV_5400": 5400,
         "VEV_5500": 5500,
     }
+
+    # Must Buy 0
+    MUST_BUY_0_VOUCHERS = [
+        "VEV_6000",
+        "VEV_6500",
+    ]
 
     # ----- Deep ITM vouchers: fair = S - K -----
     DEEP_ITM_VOUCHERS = {
@@ -2145,14 +2149,7 @@ class Trader:
     SCALE_WINDOW = 100
     WARMUP_TICKS = 30
 
-    OPEN_THRESHOLD = 0.0
-    CLOSE_THRESHOLD = 0.0
-    ENABLE_CLOSE = True
-
-    LOW_VEGA_CUTOFF = 0.5
-    LOW_VEGA_PENALTY = 0.5
-
-    MIN_SCALE = 0.0
+    ENABLE_MAKE = True
 
     # EMA_t 기준 beta 평균회귀 파라미터
     # IV curve fitting은 VEV_5000~VEV_5500, 실제 거래는 VEV_5000~VEV_5300
@@ -2314,52 +2311,103 @@ class Trader:
         sell_limit = limit + position
 
         for bid_price, bid_vol in sorted(voucher_depth.buy_orders.items(), reverse=True):
-            if bid_price > fair and sell_limit > 0:
-                sell_limit = self.add_sell_order(
-                    orders=orders,
-                    product=product,
-                    price=bid_price,
-                    volume=bid_vol,
-                    sell_limit=sell_limit,
-                )
+            if bid_price > fair:
+                sell_qty = min(bid_vol, sell_limit)
+                if sell_qty > 0:
+                    orders.append(Order(product, bid_price, -sell_qty))
+                    position -= sell_qty
+                    sell_limit -= sell_qty
             else:
                 break
 
         for ask_price, ask_vol in sorted(voucher_depth.sell_orders.items()):
-            ask_qty = -ask_vol
-
-            if ask_price < fair and buy_limit > 0:
-                buy_limit = self.add_buy_order(
-                    orders=orders,
-                    product=product,
-                    price=ask_price,
-                    volume=ask_qty,
-                    buy_limit=buy_limit,
-                )
+            if ask_price < fair:
+                buy_qty = min(-ask_vol, buy_limit)
+                if buy_qty > 0:
+                    orders.append(Order(product, ask_price, buy_qty))
+                    position += buy_qty
+                    buy_limit -= buy_qty
             else:
                 break
 
-        buy_price = min(best_bid + 1, math.floor(fair - 0.1))
+        sell_price = max(best_ask - 1, math.ceil(fair + 0.1)) if position < 0 else max(best_ask - 1, math.ceil(fair))
+        if sell_limit > 0:
+            orders.append(Order(product, sell_price, -sell_limit))
 
-        if buy_limit > 0 and buy_price < best_ask:
-            buy_limit = self.add_buy_order(
-                orders=orders,
-                product=product,
-                price=buy_price,
-                volume=buy_limit,
-                buy_limit=buy_limit,
-            )
+        buy_price = min(best_bid + 1, math.floor(fair - 0.1)) if position > 0 else min(best_bid + 1, math.floor(fair))
+        if buy_limit > 0:
+            orders.append(Order(product, buy_price, buy_limit))
 
-        sell_price = max(best_ask - 1, math.ceil(fair + 0.1))
+        return orders
+    
+    def get_velvetfruit_against_vev4000_orders(self, state: TradingState) -> List[Order]:
+        orders: List[Order] = []
 
-        if sell_limit > 0 and sell_price > best_bid:
-            sell_limit = self.add_sell_order(
-                orders=orders,
-                product=product,
-                price=sell_price,
-                volume=sell_limit,
-                sell_limit=sell_limit,
-            )
+        product = self.UNDERLYING
+        voucher = "VEV_4000"
+        strike = 4000
+
+        if product not in state.order_depths or voucher not in state.order_depths:
+            return orders
+
+        underlying_depth = state.order_depths[product]
+        voucher_depth = state.order_depths[voucher]
+
+        voucher_mid = self.get_valid_mid_price(
+            voucher_depth,
+            self.VALID_BID_ASK_VOLUME.get(voucher, 6),
+        )
+
+        if voucher_mid is None:
+            return orders
+
+        fair = voucher_mid + strike
+
+        if fair <= 0:
+            return orders
+
+        best_bid, best_ask = self.get_best_bid_ask(underlying_depth)
+
+        if best_bid is None or best_ask is None:
+            return orders
+
+        position = state.position.get(product, 0)
+        limit = self.POSITION_LIMITS[product]
+
+        buy_limit = limit - position
+        sell_limit = limit + position
+
+        # 1. Take: Velvetfruit bid가 VEV_4000 + 4000보다 비싸면 sell
+        for bid_price, bid_vol in sorted(underlying_depth.buy_orders.items(), reverse=True):
+            if bid_price > fair:
+                sell_qty = min(bid_vol, sell_limit)
+                if sell_qty > 0:
+                    orders.append(Order(product, bid_price, -sell_qty))
+                    position -= sell_qty
+                    sell_limit -= sell_qty
+            else:
+                break
+
+        # 2. Take: Velvetfruit ask가 VEV_4000 + 4000보다 싸면 buy
+        for ask_price, ask_vol in sorted(underlying_depth.sell_orders.items()):
+            if ask_price < fair:
+                buy_qty = min(-ask_vol, buy_limit)
+                if buy_qty > 0:
+                    orders.append(Order(product, ask_price, buy_qty))
+                    position += buy_qty
+                    buy_limit -= buy_qty
+            else:
+                break
+
+        # 3. Market make
+
+        sell_price = max(best_ask - 1, math.ceil(fair + 0.1)) if position < 0 else max(best_ask - 1, math.ceil(fair))
+        if sell_limit > 0:
+            orders.append(Order(product, sell_price, -sell_limit))
+        
+        buy_price = min(best_bid + 1, math.floor(fair - 0.1)) if position > 0 else min(best_bid + 1, math.floor(fair))
+        if buy_limit > 0:
+            orders.append(Order(product, buy_price, buy_limit))
 
         return orders
 
@@ -2523,7 +2571,6 @@ class Trader:
         beta = float(params["beta"])
 
         mean_key = f"{product}_mean"
-        scale_key = f"{product}_scale"
         count_key = f"{product}_count"
 
         mean_diff = self.ema(
@@ -2537,29 +2584,11 @@ class Trader:
         expected_diff = theo_diff + beta * residual
         fair_price = theo + expected_diff
 
-        abs_dev = abs(residual)
-
-        scale = self.ema(
-            traderObject=traderObject,
-            key=scale_key,
-            value=abs_dev,
-            window=self.SCALE_WINDOW,
-        )
-
         traderObject[count_key] = traderObject.get(count_key, 0) + 1
         count = traderObject[count_key]
 
         if count < self.WARMUP_TICKS:
             return orders
-
-        if scale < self.MIN_SCALE:
-            return orders
-
-        sell_signal = option_best_bid - fair_price
-        buy_signal = option_best_ask - fair_price
-
-        low_vega_adj = self.LOW_VEGA_PENALTY if vega <= self.LOW_VEGA_CUTOFF else 0.0
-        open_threshold = self.OPEN_THRESHOLD + low_vega_adj
 
         position = state.position.get(product, 0)
         limit = self.POSITION_LIMITS[product]
@@ -2567,44 +2596,37 @@ class Trader:
         buy_limit = limit - position
         sell_limit = limit + position
 
-        # Open
-        if sell_signal >= open_threshold and sell_limit > 0:
-            sell_limit = self.add_sell_order(
-                orders=orders,
-                product=product,
-                price=option_best_bid,
-                volume=sell_limit,
-                sell_limit=sell_limit,
-            )
+        # Take
+        if option_depth.buy_orders:
+            for bid_price, bid_vol in sorted(option_depth.buy_orders.items(), reverse=True):
+                if bid_price >= fair_price:
+                    sell_qty = min(bid_vol, sell_limit)
+                    if sell_qty > 0:
+                        orders.append(Order(product, bid_price, -sell_qty))
+                        position -= sell_qty
+                        sell_limit -= sell_qty
+        
+        if option_depth.sell_orders:
+            for ask_price, ask_vol in sorted(option_depth.sell_orders.items()):
+                if ask_price <= fair_price:
+                    buy_qty = min(-ask_vol, buy_limit)
+                    if buy_qty > 0:
+                        orders.append(Order(product, ask_price, buy_qty))
+                        position += buy_qty
+                        buy_limit -= buy_qty
 
-        elif buy_signal <= -open_threshold and buy_limit > 0:
-            buy_limit = self.add_buy_order(
-                orders=orders,
-                product=product,
-                price=option_best_ask,
-                volume=buy_limit,
-                buy_limit=buy_limit,
-            )
-
-        # Close
-        if self.ENABLE_CLOSE and not orders:
-            if position > 0 and sell_signal >= self.CLOSE_THRESHOLD and sell_limit > 0:
-                sell_limit = self.add_sell_order(
-                    orders=orders,
-                    product=product,
-                    price=option_best_bid,
-                    volume=position,
-                    sell_limit=sell_limit,
-                )
-
-            elif position < 0 and buy_signal <= -self.CLOSE_THRESHOLD and buy_limit > 0:
-                buy_limit = self.add_buy_order(
-                    orders=orders,
-                    product=product,
-                    price=option_best_ask,
-                    volume=-position,
-                    buy_limit=buy_limit,
-                )
+        # Market make
+        if self.ENABLE_MAKE:
+            sell_price = max(option_best_ask - 1, math.ceil(fair_price))
+            sell_qty = min(sell_limit, position)
+            if sell_qty > 0:
+                orders.append(Order(product, sell_price, -sell_qty))
+                sell_limit -= sell_qty
+            buy_price = min(option_best_bid + 1, math.floor(fair_price))
+            buy_qty = min(buy_limit, -position)
+            if buy_qty > 0:
+                orders.append(Order(product, buy_price, buy_qty))
+                buy_limit -= buy_qty
 
         return orders
     
@@ -2635,9 +2657,7 @@ class Trader:
             orders: List[Order] = []
 
             if product in self.DEEP_ITM_VOUCHERS:
-                # Deep ITM trading disabled.
-                # orders = self.get_deep_itm_voucher_orders(product, state)
-                pass
+                orders = self.get_deep_itm_voucher_orders(product, state)
 
             elif product in self.ATM_VOUCHERS:
                 orders = self.get_atm_voucher_orders(
@@ -2653,7 +2673,7 @@ class Trader:
                 pass
 
             elif product == "VELVETFRUIT_EXTRACT":
-                pass
+                orders = self.get_velvetfruit_against_vev4000_orders(state)
 
             result[product] = orders
 
