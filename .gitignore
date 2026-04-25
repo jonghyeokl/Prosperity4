@@ -40,3 +40,5 @@ htmlcov/
 .idea/
 
 backtests/
+
+jonghyeok/data_analysis/output/theo_diff_multivariate_mr/
