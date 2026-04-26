@@ -2155,7 +2155,7 @@ class Trader:
 
     Z_SCORE_PRODUCTS = [
         "HYDROGEL_PACK",
-        # "VELVETFRUIT_EXTRACT",
+        "VELVETFRUIT_EXTRACT",
     ]
 
     Z_SCORE_PARAMS = {
