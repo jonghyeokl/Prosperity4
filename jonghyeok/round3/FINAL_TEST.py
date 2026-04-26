@@ -2165,9 +2165,10 @@ class Trader:
             "threshold_param_alpha": 0.025,
         },
         "VELVETFRUIT_EXTRACT": {
-            "valid_mid_history_length": 1100,
+            "valid_mid_history_length": 800,
             "threshold_param_beta": 0.11,
             "threshold_param_alpha": 1e-6,
+            "threshold": 2.1,
         },
     }
 
@@ -2689,7 +2690,7 @@ class Trader:
         alpha = self.Z_SCORE_PARAMS[product]["threshold_param_alpha"]
 
         if alpha == 1e-6:
-            return beta, beta
+            return self.Z_SCORE_PARAMS[product]["threshold"], self.Z_SCORE_PARAMS[product]["threshold"]
 
         if position >= 0:
             ratio = max(0.0, min(1.0, position / limit))
@@ -2904,6 +2905,50 @@ class Trader:
             fair_value=fair_value,
             threshold=threshold,
         )
+    
+    def get_vev_5500_orders(self, product: str, state: TradingState, traderObject: dict, day_num: int) -> List[Order]:
+        tte = 8 - day_num - (state.timestamp / 1_000_000.0)
+        fair_value = tte
+
+        orders: List[Order] = []
+
+        best_bid, best_ask = self.get_best_bid_ask(state.order_depths[product])
+
+        position = state.position.get(product, 0)
+        limit = self.POSITION_LIMITS[product]
+        buy_limit = limit - position
+        sell_limit = limit + position
+
+        for bid_price, bid_vol in sorted(state.order_depths[product].buy_orders.items(), reverse=True):
+            if bid_price > fair_value:
+                sell_qty = min(bid_vol, sell_limit)
+                if sell_qty > 0:
+                    orders.append(Order(product, bid_price, -sell_qty))
+                    position -= sell_qty
+                    sell_limit -= sell_qty
+            else:
+                break
+
+        for ask_price, ask_vol in sorted(state.order_depths[product].sell_orders.items()):
+            if ask_price < fair_value:
+                buy_qty = min(-ask_vol, buy_limit)
+                if buy_qty > 0:
+                    orders.append(Order(product, ask_price, buy_qty))
+                    position += buy_qty
+                    buy_limit -= buy_qty
+            else:
+                break
+
+        sell_price = max(best_ask - 1, math.ceil(fair_value)) if position < 0 else max(best_ask - 1, math.ceil(fair_value))
+        if sell_limit > 0:
+            orders.append(Order(product, sell_price, -sell_limit))
+
+        buy_price = min(best_bid + 1, math.floor(fair_value)) if position > 0 else min(best_bid + 1, math.floor(fair_value))
+        if buy_limit > 0:
+            orders.append(Order(product, buy_price, buy_limit))
+
+        return orders
+
     def get_z_score_orders(self, product: str, state: TradingState, traderObject: dict) -> List[Order]:
         params = self.Z_SCORE_PARAMS.get(product, {
             "valid_mid_history_length": 1000,
@@ -2988,6 +3033,9 @@ class Trader:
 
             elif product in self.MUST_BUY_0_VOUCHERS:
                 orders = self.get_must_buy_0_voucher_orders(product, state)
+            
+            elif product == "VEV_5500":
+                orders = self.get_vev_5500_orders(product, state, traderObject, day_num)
 
             result[product] = orders
 
