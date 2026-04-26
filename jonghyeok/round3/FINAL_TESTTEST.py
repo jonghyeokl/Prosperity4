@@ -3001,39 +3001,39 @@ class Trader:
         # IV curve fitting은 주문 루프 전에 먼저 수행합니다.
         # DAY_VOUCHER_HISTORY_MAP에 day_num key가 있으면 해당 history로 시작하고,
         # 없으면 빈 history로 시작합니다. coeffs가 None이면 ATM voucher 거래를 하지 않습니다.
-        # rolling_coeffs, underlying_mid, T = self.update_smile_history_and_fit(
-        #     state=state,
-        #     traderObject=traderObject,
-        #     day_num=day_num,
-        # )
+        rolling_coeffs, underlying_mid, T = self.update_smile_history_and_fit(
+            state=state,
+            traderObject=traderObject,
+            day_num=day_num,
+        )
 
         for product in state.order_depths:
             orders: List[Order] = []
 
-            # if product in self.DEEP_ITM_VOUCHERS:
-            #     orders = self.get_deep_itm_voucher_orders(product, state)
+            if product in self.DEEP_ITM_VOUCHERS:
+                orders = self.get_deep_itm_voucher_orders(product, state)
 
-            # elif product in self.ATM_VOUCHERS:
-            #     orders = self.get_atm_voucher_orders(
-            #         product=product,
-            #         state=state,
-            #         traderObject=traderObject,
-            #         rolling_coeffs=rolling_coeffs,
-            #         underlying_mid=underlying_mid,
-            #         T=T,
-            #     )
+            elif product in self.ATM_VOUCHERS:
+                orders = self.get_atm_voucher_orders(
+                    product=product,
+                    state=state,
+                    traderObject=traderObject,
+                    rolling_coeffs=rolling_coeffs,
+                    underlying_mid=underlying_mid,
+                    T=T,
+                )
 
-            if product in self.EMA_ZSCORE_PRODUCTS:
+            elif product in self.EMA_ZSCORE_PRODUCTS:
                 orders = self.get_ema_zscore_orders(product, state, traderObject)
 
-            # elif product in self.Z_SCORE_PRODUCTS:
-            #     orders = self.get_z_score_orders(product, state, traderObject)
+            elif product in self.Z_SCORE_PRODUCTS:
+                orders = self.get_z_score_orders(product, state, traderObject)
 
-            # elif product in self.MUST_BUY_0_VOUCHERS:
-            #     orders = self.get_must_buy_0_voucher_orders(product, state)
+            elif product in self.MUST_BUY_0_VOUCHERS:
+                orders = self.get_must_buy_0_voucher_orders(product, state)
             
-            # elif product == "VEV_5500":
-            #     orders = self.get_vev_5500_orders(product, state, traderObject, day_num)
+            elif product == "VEV_5500":
+                orders = self.get_vev_5500_orders(product, state, traderObject, day_num)
 
             result[product] = orders
 
