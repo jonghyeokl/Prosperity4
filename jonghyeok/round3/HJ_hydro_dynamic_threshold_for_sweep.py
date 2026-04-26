@@ -153,7 +153,7 @@ logger = Logger()
 
 
 class Trader:
-    PRODUCT = "HYDROGEL_PACK"
+    PRODUCT = "VELVETFRUIT_EXTRACT"
 
     POSITION_LIMITS = {
         "HYDROGEL_PACK": 200,

@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Optional
 
 
-PRODUCT = "HYDROGEL_PACK"
-PRODUCT_LINE_RE = re.compile(r"^HYDROGEL_PACK:\s*(-?[\d,]+)\s*$")
+PRODUCT = "VELVETFRUIT_EXTRACT"
+PRODUCT_LINE_RE = re.compile(r"^VELVETFRUIT_EXTRACT:\s*(-?[\d,]+)\s*$")
 
-DEFAULT_WINDOWS = [1000]
-DEFAULT_ALPHAS = [0.015, 0.02, 0.025, 0.03]
-DEFAULT_BETAS = [0.145, 0.15, 0.155]
+DEFAULT_WINDOWS = [1100]
+DEFAULT_ALPHAS = [1e-6, 0.0013]
+DEFAULT_BETAS = [0.11]
 
 
 def parse_int_list(s: str) -> list[int]:
