@@ -54,8 +54,8 @@ class Trader:
 
     ENABLE_MAKE = True
 
-    EMA_WINDOW = env_int("HJ_EMA_WINDOW", 750)
-    Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 1.25))
+    EMA_WINDOW = env_int("HJ_EMA_WINDOW", 1000)
+    Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 0.75))
     MIN_STD = env_float("HJ_MIN_STD", 1e-9)
 
 
