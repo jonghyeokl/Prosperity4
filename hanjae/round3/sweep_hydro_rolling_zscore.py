@@ -11,8 +11,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-PRODUCT = "VEV_5500"
-PRODUCT_RE = re.compile(f"^{PRODUCT}:\s*(-?[\d,]+)\s*$")
+
+HYDRO_RE = re.compile(r"^HYDROGEL_PACK:\s*(-?[\d,]+)\s*$")
 
 
 def parse_number_list(raw: str, cast):
@@ -21,14 +21,27 @@ def parse_number_list(raw: str, cast):
     return [cast(x.strip()) for x in raw.split(",") if x.strip()]
 
 
-def parse_product_pnl(stdout: str) -> int:
-    total = 0
+def parse_hydrogel_pnls(stdout: str) -> list[int]:
+    """
+    Backtester stdout에서 HYDROGEL_PACK pnl 라인을 모두 추출한다.
+
+    예상 예시:
+        HYDROGEL_PACK: 12,345
+        HYDROGEL_PACK: 23,456
+        HYDROGEL_PACK: 34,567
+
+    반환:
+        [12345, 23456, 34567]
+    """
+    pnls = []
+
     for raw_line in stdout.splitlines():
         line = raw_line.strip()
-        m = PRODUCT_RE.match(line)
+        m = HYDRO_RE.match(line)
         if m:
-            total += int(m.group(1).replace(",", ""))
-    return total
+            pnls.append(int(m.group(1).replace(",", "")))
+
+    return pnls
 
 
 def cleanup_backtest_outputs(start_time: float) -> None:
@@ -83,8 +96,20 @@ def run_one(args, params: dict[str, Any], start_time: float) -> dict[str, Any]:
             f"output:\n{completed.stdout}"
         )
 
+    pnls = parse_hydrogel_pnls(completed.stdout)
+
     row = dict(params["row"])
-    row[f"{PRODUCT}_pnl_3d"] = parse_product_pnl(completed.stdout)
+
+    # day별 pnl 저장
+    for day_idx, pnl in enumerate(pnls):
+        row[f"hydrogel_pnl_day{day_idx}"] = pnl
+
+    # 혹시 3일보다 적게 잡히는 경우에도 컬럼 모양을 일정하게 유지
+    for day_idx in range(len(pnls), 3):
+        row[f"hydrogel_pnl_day{day_idx}"] = 0
+
+    row["hydrogel_pnl_3d"] = sum(pnls)
+
     return row
 
 
@@ -98,7 +123,21 @@ def write_rows(path: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
 
-    fieldnames = list(rows[0].keys())
+    preferred_order = [
+        "valid_mid_history_length",
+        "z_score_threshold",
+        "hydrogel_pnl_day0",
+        "hydrogel_pnl_day1",
+        "hydrogel_pnl_day2",
+        "hydrogel_pnl_3d",
+    ]
+
+    all_keys = set()
+    for row in rows:
+        all_keys.update(row.keys())
+
+    fieldnames = [k for k in preferred_order if k in all_keys]
+    fieldnames += [k for k in rows[0].keys() if k not in fieldnames]
 
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -108,14 +147,22 @@ def write_rows(path: str, rows: list[dict[str, Any]]) -> None:
 
 def print_summary(rows: list[dict[str, Any]], top_n: int) -> None:
     print("\n\n==================== SUMMARY ====================")
-    rows = sorted(rows, key=lambda r: r[f"{PRODUCT}_pnl_3d"], reverse=True)
+    rows = sorted(rows, key=lambda r: r["hydrogel_pnl_3d"], reverse=True)
 
     for i, row in enumerate(rows[:top_n], start=1):
-        params = ", ".join(
-            f"{k}={v}" for k, v in row.items()
-            if k != f"{PRODUCT}_pnl_3d"
+        length = row.get("valid_mid_history_length")
+        z = row.get("z_score_threshold")
+
+        day0 = row.get("hydrogel_pnl_day0", 0)
+        day1 = row.get("hydrogel_pnl_day1", 0)
+        day2 = row.get("hydrogel_pnl_day2", 0)
+        total = row.get("hydrogel_pnl_3d", 0)
+
+        print(
+            f"{i:>3}. total={total:,} "
+            f"| day0={day0:,}, day1={day1:,}, day2={day2:,} "
+            f"| length={length}, z={z}"
         )
-        print(f"{i:>3}. pnl={row[f'{PRODUCT}_pnl_3d']:,} | {params}")
 
 
 def build_param_grid(args) -> list[dict[str, Any]]:
@@ -123,6 +170,7 @@ def build_param_grid(args) -> list[dict[str, Any]]:
     z_thresholds = parse_number_list(args.z_thresholds, float)
 
     out = []
+
     for length in lengths:
         for z in z_thresholds:
             out.append({
@@ -135,22 +183,32 @@ def build_param_grid(args) -> list[dict[str, Any]]:
                     "z_score_threshold": z,
                 },
             })
+
     return out
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo", default="./data_analysis_tool/rolling_zscore_for_sweep.py")
+
+    parser.add_argument(
+        "--algo",
+        default="./jonghyeok/round3/HJ_hydro_rolling_zscore_for_sweep.py",
+    )
     parser.add_argument("--round", type=int, default=3)
     parser.add_argument("--data", default="./data_capsule")
+
+    # Windows에서는 실행할 때 --python py 로 넘기면 됨
     parser.add_argument("--python", default="./.venv/bin/python")
+
     parser.add_argument("--py-path", default="./imc-prosperity-3-backtester")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--timeout", type=int, default=0, help="0 means no timeout")
     parser.add_argument("--top-n", type=int, default=20)
     parser.add_argument("--out", default="", help="Optional csv path. Empty means no csv saved.")
-    parser.add_argument("--lengths", default="10,20,30,40,50,70,100,150,200,300,500,750,1000") #10,20,30,40,50,70,100,150,200,300,500,750,1000
-    parser.add_argument("--z-thresholds", default="0,0.25,0.5,0.75,1,1.25,1.5,2,2.5,3") #0,0.25,0.5,0.75,1,1.25,1.5,2,2.5,3
+
+    parser.add_argument("--lengths", default="900,1000,1100")
+    parser.add_argument("--z-thresholds", default="0.95,1.0,1.05,1.1")
+
     args = parser.parse_args()
 
     params_list = build_param_grid(args)
@@ -169,15 +227,26 @@ def main() -> None:
             futures.append(executor.submit(run_one, args, params, start_time))
 
         done = 0
+
         for fut in as_completed(futures):
             done += 1
             row = fut.result()
             rows.append(row)
-            params = ", ".join(
-                f"{k}={v}" for k, v in row.items()
-                if k != f"{PRODUCT}_pnl_3d"
+
+            length = row.get("valid_mid_history_length")
+            z = row.get("z_score_threshold")
+
+            day0 = row.get("hydrogel_pnl_day0", 0)
+            day1 = row.get("hydrogel_pnl_day1", 0)
+            day2 = row.get("hydrogel_pnl_day2", 0)
+            total_pnl = row.get("hydrogel_pnl_3d", 0)
+
+            print(
+                f"[DONE {done}/{total}] "
+                f"total={total_pnl:,} "
+                f"| day0={day0:,}, day1={day1:,}, day2={day2:,} "
+                f"| length={length}, z={z}"
             )
-            print(f"[DONE {done}/{total}] pnl={row[f'{PRODUCT}_pnl_3d']:,} | {params}")
 
     cleanup_backtest_outputs(start_time)
     write_rows(args.out, rows)
@@ -191,3 +260,12 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+"""
+./.venv/bin/python jonghyeok/data_analysis/sweep_hydro_rolling_zscore.py \  --algo ./jonghyeok/round3/HJ_hydro_rolling_zscore_for_sweep.py \
+  —round 3 \
+  —data ./data_capsule \
+  —python ./.venv/bin/python \
+  —py-path ./imc-prosperity-3-backtester \
+  —workers 4
+"""

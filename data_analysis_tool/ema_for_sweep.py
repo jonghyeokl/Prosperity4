@@ -4,7 +4,7 @@ import jsonpickle
 import math
 import os
 
-PRODUCT = "VELVETFRUIT_EXTRACT"
+PRODUCT = "VEV_5500"
 
 def env_int(name: str, default: int) -> int:
     try:

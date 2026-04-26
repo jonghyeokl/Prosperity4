@@ -6,7 +6,6 @@ import jsonpickle
 import math
 import os
 
-PRODUCT = "VEV_5500"
 
 def env_int(name: str, default: int) -> int:
     try:
@@ -20,6 +19,7 @@ def env_float(name: str, default: float) -> float:
         return float(os.environ.get(name, default))
     except Exception:
         return default
+
 
 # ============================================================
 #  Logger
@@ -45,7 +45,6 @@ class Logger:
             )
         )
 
-        # We truncate state.traderData, trader_data, and self.logs to the same max. length to fit the log limit
         max_item_length = (self.max_log_length - base_length) // 3
 
         print(
@@ -152,11 +151,13 @@ class Logger:
 
         return out
 
+
 logger = Logger()
 
 
 class Trader:
-    
+    PRODUCT = "HYDROGEL_PACK"
+
     POSITION_LIMITS = {
         "HYDROGEL_PACK": 200,
         "VELVETFRUIT_EXTRACT": 200,
@@ -189,10 +190,12 @@ class Trader:
 
     ENABLE_MAKE = True
 
+    # EMA span / warm-up length
     VALID_MID_HISTORY_LENGTH = env_int("HJ_VALID_MID_HISTORY_LENGTH", 1000)
+
+    # threshold = Z_SCORE_THRESHOLD * std
     Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 1.0))
     MIN_STD = env_float("HJ_MIN_STD", 1e-9)
-
 
     def get_best_bid_ask(self, order_depth: OrderDepth):
         best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
@@ -229,6 +232,24 @@ class Trader:
             return (best_valid_bid + best_valid_ask) / 2.0
 
         return None
+
+    def calc_ema(self, values: list[float], span: int) -> float:
+        """
+        EMA span=1000.
+        pandas ewm(span=1000, adjust=False)와 같은 형태:
+            alpha = 2 / (span + 1)
+            ema_t = alpha * price_t + (1 - alpha) * ema_{t-1}
+        """
+        if not values:
+            return 0.0
+
+        alpha = 2.0 / (span + 1.0)
+        ema = values[0]
+
+        for x in values[1:]:
+            ema = alpha * x + (1.0 - alpha) * ema
+
+        return ema
 
     def add_take_and_make_orders(
         self,
@@ -285,8 +306,8 @@ class Trader:
 
         return orders
 
-    def get_product_orders(self, state: TradingState, traderObject: dict) -> List[Order]:
-        product = PRODUCT
+    def get_hydrogel_orders(self, state: TradingState, traderObject: dict) -> List[Order]:
+        product = self.PRODUCT
         if product not in state.order_depths:
             return []
 
@@ -295,16 +316,20 @@ class Trader:
         if valid_mid is None:
             return []
 
-        key = f"{PRODUCT}_valid_mid_history"
+        key = "hydrogel_valid_mid_history"
         history = traderObject.get(key, [])
         history.append(float(valid_mid))
         history = history[-self.VALID_MID_HISTORY_LENGTH:]
         traderObject[key] = history
 
+        # baseline 유지: 1000개 쌓이기 전에는 거래 안 함
         if len(history) < self.VALID_MID_HISTORY_LENGTH:
             return []
 
-        fair_value = sum(history) / len(history)
+        # EMA_1000 fair value
+        fair_value = self.calc_ema(history, self.VALID_MID_HISTORY_LENGTH)
+
+        # std는 EMA fair 기준으로 계산
         var = sum((x - fair_value) ** 2 for x in history) / len(history)
         std = math.sqrt(var)
 
@@ -312,6 +337,12 @@ class Trader:
             return []
 
         threshold = self.Z_SCORE_THRESHOLD * std
+
+        logger.print(
+            f"HYDRO EMA mid={valid_mid:.2f}, fair_ema={fair_value:.2f}, "
+            f"std={std:.2f}, threshold={threshold:.2f}, len={len(history)}"
+        )
+
         return self.add_take_and_make_orders(
             product=product,
             order_depth=depth,
@@ -319,7 +350,6 @@ class Trader:
             fair_value=fair_value,
             threshold=threshold,
         )
-
 
     def run(self, state: TradingState, day_num: int):
         traderObject = {}
@@ -334,8 +364,8 @@ class Trader:
 
         result = {}
         for product in state.order_depths:
-            if product == PRODUCT:
-                result[product] = self.get_product_orders(state, traderObject)
+            if product == self.PRODUCT:
+                result[product] = self.get_hydrogel_orders(state, traderObject)
             else:
                 result[product] = []
 

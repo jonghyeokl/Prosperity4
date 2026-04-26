@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-PRODUCT = "VELVETFRUIT_EXTRACT"
+PRODUCT = "VEV_5500"
 PRODUCT_RE = re.compile(f"^{PRODUCT}:\s*(-?[\d,]+)\s*$")
 
 
