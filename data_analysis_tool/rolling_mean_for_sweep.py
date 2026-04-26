@@ -55,8 +55,8 @@ class Trader:
 
     ENABLE_MAKE = True
 
-    VALID_MID_HISTORY_LENGTH = env_int("HJ_VALID_MID_HISTORY_LENGTH", 100)
-    THRESHOLD = env_float("HJ_THRESHOLD", 0.0)
+    VALID_MID_HISTORY_LENGTH = env_int("HJ_VALID_MID_HISTORY_LENGTH", 500)
+    THRESHOLD = env_float("HJ_THRESHOLD", 1.1)
 
 
     def get_best_bid_ask(self, order_depth: OrderDepth):
