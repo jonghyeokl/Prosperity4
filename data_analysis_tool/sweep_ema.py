@@ -11,8 +11,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-
-HYDRO_RE = re.compile(r"^HYDROGEL_PACK:\s*(-?[\d,]+)\s*$")
+PRODUCT = "HYDROGEL_PACK"
+PRODUCT_RE = re.compile(f"^{PRODUCT}:\s*(-?[\d,]+)\s*$")
 
 
 def parse_number_list(raw: str, cast):
@@ -21,11 +21,11 @@ def parse_number_list(raw: str, cast):
     return [cast(x.strip()) for x in raw.split(",") if x.strip()]
 
 
-def parse_hydrogel_pnl(stdout: str) -> int:
+def parse_product_pnl(stdout: str) -> int:
     total = 0
     for raw_line in stdout.splitlines():
         line = raw_line.strip()
-        m = HYDRO_RE.match(line)
+        m = PRODUCT_RE.match(line)
         if m:
             total += int(m.group(1).replace(",", ""))
     return total
@@ -84,7 +84,7 @@ def run_one(args, params: dict[str, Any], start_time: float) -> dict[str, Any]:
         )
 
     row = dict(params["row"])
-    row["hydrogel_pnl_3d"] = parse_hydrogel_pnl(completed.stdout)
+    row[f"{PRODUCT}_pnl_3d"] = parse_product_pnl(completed.stdout)
     return row
 
 
@@ -108,31 +108,31 @@ def write_rows(path: str, rows: list[dict[str, Any]]) -> None:
 
 def print_summary(rows: list[dict[str, Any]], top_n: int) -> None:
     print("\n\n==================== SUMMARY ====================")
-    rows = sorted(rows, key=lambda r: r["hydrogel_pnl_3d"], reverse=True)
+    rows = sorted(rows, key=lambda r: r[f"{PRODUCT}_pnl_3d"], reverse=True)
 
     for i, row in enumerate(rows[:top_n], start=1):
         params = ", ".join(
             f"{k}={v}" for k, v in row.items()
-            if k != "hydrogel_pnl_3d"
+            if k != f"{PRODUCT}_pnl_3d"
         )
-        print(f"{i:>3}. pnl={row['hydrogel_pnl_3d']:,} | {params}")
+        print(f"{i:>3}. pnl={row[f'{PRODUCT}_pnl_3d']:,} | {params}")
 
 
 def build_param_grid(args) -> list[dict[str, Any]]:
-    lengths = parse_number_list(args.lengths, int)
-    z_thresholds = parse_number_list(args.z_thresholds, float)
+    ema_windows = parse_number_list(args.ema_windows, int)
+    thresholds = parse_number_list(args.thresholds, float)
 
     out = []
-    for length in lengths:
-        for z in z_thresholds:
+    for window in ema_windows:
+        for threshold in thresholds:
             out.append({
                 "env": {
-                    "HJ_VALID_MID_HISTORY_LENGTH": length,
-                    "HJ_Z_SCORE_THRESHOLD": z,
+                    "HJ_EMA_WINDOW": window,
+                    "HJ_THRESHOLD": threshold,
                 },
                 "row": {
-                    "valid_mid_history_length": length,
-                    "z_score_threshold": z,
+                    "ema_window": window,
+                    "threshold": threshold,
                 },
             })
     return out
@@ -140,7 +140,7 @@ def build_param_grid(args) -> list[dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo", default="./jonghyeok/round3/HJ_hydro_rolling_zscore_for_sweep.py")
+    parser.add_argument("--algo", default="./data_analysis_tool/ema_for_sweep.py")
     parser.add_argument("--round", type=int, default=3)
     parser.add_argument("--data", default="./data_capsule")
     parser.add_argument("--python", default="./.venv/bin/python")
@@ -149,8 +149,8 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=0, help="0 means no timeout")
     parser.add_argument("--top-n", type=int, default=20)
     parser.add_argument("--out", default="", help="Optional csv path. Empty means no csv saved.")
-    parser.add_argument("--lengths", default="700,800,900,1000,1100,1200,1500")
-    parser.add_argument("--z-thresholds", default="0.75,0.85,0.95,1.0,1.05,1.1,1.2,1.3")
+    parser.add_argument("--ema-windows", default="5,10,20,30,40,50,70,100,150,200,300,500")
+    parser.add_argument("--thresholds", default="0,0.5,1,1.5,2,3,5,8,10")
     args = parser.parse_args()
 
     params_list = build_param_grid(args)
@@ -175,9 +175,9 @@ def main() -> None:
             rows.append(row)
             params = ", ".join(
                 f"{k}={v}" for k, v in row.items()
-                if k != "hydrogel_pnl_3d"
+                if k != f"{PRODUCT}_pnl_3d"
             )
-            print(f"[DONE {done}/{total}] pnl={row['hydrogel_pnl_3d']:,} | {params}")
+            print(f"[DONE {done}/{total}] pnl={row[f'{PRODUCT}_pnl_3d']:,} | {params}")
 
     cleanup_backtest_outputs(start_time)
     write_rows(args.out, rows)
@@ -191,12 +191,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-"""
-./.venv/bin/python jonghyeok/data_analysis/sweep_hydro_rolling_zscore.py \  --algo ./jonghyeok/round3/HJ_hydro_rolling_zscore_for_sweep.py \
-  —round 3 \
-  —data ./data_capsule \
-  —python ./.venv/bin/python \
-  —py-path ./imc-prosperity-3-backtester \
-  —workers 4
-"""
