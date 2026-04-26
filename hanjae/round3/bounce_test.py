@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 
 TARGET_SYMBOL = "HYDROGEL_PACK"
-HORIZON = 10   # 몇 timeclock 기준으로 볼지
+HORIZON = 750   # 몇 timeclock 기준으로 볼지
 
 
 HEADERS = [
