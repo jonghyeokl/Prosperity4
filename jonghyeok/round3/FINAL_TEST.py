@@ -2688,6 +2688,9 @@ class Trader:
         beta = self.Z_SCORE_PARAMS[product]["threshold_param_beta"]
         alpha = self.Z_SCORE_PARAMS[product]["threshold_param_alpha"]
 
+        if alpha == 1e-6:
+            return beta, beta
+
         if position >= 0:
             ratio = max(0.0, min(1.0, position / limit))
             p_buy = beta * pow(1.0 - ratio, alpha)
