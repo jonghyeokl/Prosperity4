@@ -1,5 +1,6 @@
 from datamodel import OrderDepth, UserId, TradingState, Order
 from typing import List, Any, Dict, Optional, Tuple
+from statistics import NormalDist
 import json
 import jsonpickle
 import math
@@ -9,6 +10,7 @@ from datamodel import (
     Symbol, Trade, TradingState,
 )
 
+NORMAL = NormalDist()
 
 # 여기에 생성된 DAY_VOUCHER_HISTORY_MAP을 그대로 붙여넣으시면 됩니다.
 # 구조: DAY_VOUCHER_HISTORY_MAP[day_num][voucher] = list[(m, iv)]
@@ -2153,21 +2155,23 @@ class Trader:
 
     Z_SCORE_PRODUCTS = [
         "HYDROGEL_PACK",
-        "VELVETFRUIT_EXTRACT",
+        # "VELVETFRUIT_EXTRACT",
     ]
 
     Z_SCORE_PARAMS = {
         "HYDROGEL_PACK": {
             "valid_mid_history_length": 1000,
-            "z_score_threshold": 1.0,
-            "min_std": 1e-9,
+            "threshold_param_beta": 0.15,
+            "threshold_param_alpha": 0.025,
         },
-        "VELVETFRUIT_EXTRACT": {
-            "valid_mid_history_length": 800,
-            "z_score_threshold": 2.1,
-            "min_std": 1e-9,
-        },
+        # "VELVETFRUIT_EXTRACT": {
+        #     "valid_mid_history_length": 800,
+        #     "z_score_threshold": 2.1,
+        # },
     }
+
+    MIN_STD = 1e-9
+    P_EPS = 1e-6
 
     # EMA_t 기준 beta 평균회귀 파라미터
     # IV curve fitting은 VEV_5000~VEV_5500, 실제 거래는 VEV_5000~VEV_5300
@@ -2658,6 +2662,31 @@ class Trader:
 
         return orders
     
+    def _threshold_from_tail_prob(self, tail_prob: float) -> float:
+        # threshold = Phi^{-1}(1 - tail_prob)
+        p = max(self.P_EPS, min(1.0 - self.P_EPS, tail_prob))
+        return NORMAL.inv_cdf(1.0 - p)
+
+    def get_z_thresholds(self, product: str, position: int, limit: int):
+        if limit <= 0:
+            return 0.0, 0.0
+
+        beta = self.Z_SCORE_PARAMS[product]["threshold_param_beta"]
+        alpha = self.Z_SCORE_PARAMS[product]["threshold_param_alpha"]
+
+        if position >= 0:
+            ratio = max(0.0, min(1.0, position / limit))
+            p_buy = beta * pow(1.0 - ratio, alpha)
+            p_sell = 2.0 * beta - p_buy
+        else:
+            ratio = max(0.0, min(1.0, abs(position) / limit))
+            p_sell = beta * pow(1.0 - ratio, alpha)
+            p_buy = 2.0 * beta - p_sell
+
+        buy_threshold = self._threshold_from_tail_prob(p_buy)
+        sell_threshold = self._threshold_from_tail_prob(p_sell)
+        return buy_threshold, sell_threshold
+    
     def add_take_and_make_orders(
         self,
         *,
@@ -2665,7 +2694,7 @@ class Trader:
         order_depth: OrderDepth,
         state: TradingState,
         fair_value: float,
-        threshold: float,
+        std: float,
     ) -> List[Order]:
         orders: List[Order] = []
 
@@ -2678,9 +2707,10 @@ class Trader:
         buy_limit = limit - position
         sell_limit = limit + position
 
-        # Take sell: bid - fair_value > threshold
+        # Take sell
         for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
-            if bid_price - fair_value <= threshold or sell_limit <= 0:
+            _buy_threshold, sell_threshold = self.get_z_thresholds(product, position, limit)
+            if (bid_price - fair_value) / std <= sell_threshold or sell_limit <= 0:
                 break
 
             sell_qty = min(bid_vol, sell_limit)
@@ -2689,9 +2719,10 @@ class Trader:
                 position -= sell_qty
                 sell_limit -= sell_qty
 
-        # Take buy: ask - fair_value < -threshold
+        # Take buy
         for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
-            if ask_price - fair_value >= -threshold or buy_limit <= 0:
+            buy_threshold, _sell_threshold = self.get_z_thresholds(product, position, limit)
+            if (ask_price - fair_value) / std >= -buy_threshold or buy_limit <= 0:
                 break
 
             buy_qty = min(-ask_vol, buy_limit)
@@ -2702,8 +2733,10 @@ class Trader:
 
         # Make
         if self.ENABLE_MAKE:
-            sell_price = max(best_ask - 1, math.ceil(fair_value + threshold))
-            buy_price = min(best_bid + 1, math.floor(fair_value - threshold))
+            buy_threshold, sell_threshold = self.get_z_thresholds(product, position, limit)
+
+            sell_price = max(best_ask - 1, math.ceil(fair_value + sell_threshold * std))
+            buy_price = min(best_bid + 1, math.floor(fair_value - buy_threshold * std))
 
             if sell_limit > 0:
                 orders.append(Order(product, int(sell_price), -int(sell_limit)))
@@ -2716,14 +2749,10 @@ class Trader:
     def get_z_score_orders(self, product: str, state: TradingState, traderObject: dict) -> List[Order]:
         params = self.Z_SCORE_PARAMS.get(product, {
             "valid_mid_history_length": 1000,
-            "z_score_threshold": 1.0,
-            "min_std": 1e-9,
+            "threshold_param_beta": 0.025,
+            "threshold_param_alpha": 0.15,
         })
         valid_mid_history_length = int(params["valid_mid_history_length"])
-        z_score_threshold = float(params["z_score_threshold"])
-        min_std = float(params["min_std"])
-        if product not in state.order_depths:
-            return []
 
         depth = state.order_depths[product]
         valid_mid = self.get_valid_mid_price(depth, self.VALID_BID_ASK_VOLUME[product])
@@ -2743,16 +2772,15 @@ class Trader:
         var = sum((x - fair_value) ** 2 for x in history) / len(history)
         std = math.sqrt(var)
 
-        if std <= min_std or not math.isfinite(std):
+        if std <= self.MIN_STD or not math.isfinite(std):
             return []
 
-        threshold = z_score_threshold * std
         return self.add_take_and_make_orders(
             product=product,
             order_depth=depth,
             state=state,
             fair_value=fair_value,
-            threshold=threshold,
+            std=std,
         )
     
 
@@ -2794,12 +2822,9 @@ class Trader:
                     T=T,
                 )
 
-            elif product == "HYDROGEL_PACK":
+            elif product in self.Z_SCORE_PRODUCTS:
                 orders = self.get_z_score_orders(product, state, traderObject)
 
-            elif product == "VELVETFRUIT_EXTRACT":
-                orders = self.get_z_score_orders(product, state, traderObject)
-            
             elif product in self.MUST_BUY_0_VOUCHERS:
                 orders = self.get_must_buy_0_voucher_orders(product, state)
 
