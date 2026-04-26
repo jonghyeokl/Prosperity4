@@ -155,7 +155,7 @@ logger = Logger()
 
 
 class Trader:
-    PRODUCT = "HYDROGEL_PACK"
+    PRODUCT = "VELVETFRUIT_EXTRACT" 
 
     POSITION_LIMITS = {
         "HYDROGEL_PACK": 200,
@@ -189,8 +189,8 @@ class Trader:
 
     ENABLE_MAKE = True
 
-    VALID_MID_HISTORY_LENGTH = env_int("HJ_VALID_MID_HISTORY_LENGTH", 1000)
-    Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 1.0))
+    VALID_MID_HISTORY_LENGTH = env_int("HJ_VALID_MID_HISTORY_LENGTH", 800)
+    Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 2.1))
     MIN_STD = env_float("HJ_MIN_STD", 1e-9)
 
 

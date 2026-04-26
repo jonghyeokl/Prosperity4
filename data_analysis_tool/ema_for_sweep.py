@@ -4,7 +4,7 @@ import jsonpickle
 import math
 import os
 
-PRODUCT = "HYDROGEL_PACK"
+PRODUCT = "VELVETFRUIT_EXTRACT"
 
 def env_int(name: str, default: int) -> int:
     try:

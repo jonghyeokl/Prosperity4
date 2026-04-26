@@ -11,8 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-PRODUCT = "HYDROGEL_PACK"
-
+PRODUCT = "VELVETFRUIT_EXTRACT"
 PRODUCT_RE = re.compile(f"^{PRODUCT}:\s*(-?[\d,]+)\s*$")
 
 
@@ -150,8 +149,8 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=0, help="0 means no timeout")
     parser.add_argument("--top-n", type=int, default=20)
     parser.add_argument("--out", default="", help="Optional csv path. Empty means no csv saved.")
-    parser.add_argument("--lengths", default="900,1000,1100")
-    parser.add_argument("--z-thresholds", default="0.95,1.0,1.05")
+    parser.add_argument("--lengths", default="700,750,800,850") #10,20,30,40,50,70,100,150,200,300,500,750,1000
+    parser.add_argument("--z-thresholds", default="1.95,2.0,2.05,2.1,2.15,2.2,2.25") #0,0.25,0.5,0.75,1,1.25,1.5,2,2.5,3
     args = parser.parse_args()
 
     params_list = build_param_grid(args)

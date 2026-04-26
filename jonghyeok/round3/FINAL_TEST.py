@@ -2151,9 +2151,23 @@ class Trader:
 
     ENABLE_MAKE = True
 
-    VALID_MID_HISTORY_LENGTH = 1000
-    Z_SCORE_THRESHOLD = 1.0
-    MIN_STD = 1e-9
+    Z_SCORE_PRODUCTS = [
+        "HYDROGEL_PACK",
+        "VELVETFRUIT_EXTRACT",
+    ]
+
+    Z_SCORE_PARAMS = {
+        "HYDROGEL_PACK": {
+            "valid_mid_history_length": 1000,
+            "z_score_threshold": 1.0,
+            "min_std": 1e-9,
+        },
+        "VELVETFRUIT_EXTRACT": {
+            "valid_mid_history_length": 800,
+            "z_score_threshold": 2.1,
+            "min_std": 1e-9,
+        },
+    }
 
     # EMA_t 기준 beta 평균회귀 파라미터
     # IV curve fitting은 VEV_5000~VEV_5500, 실제 거래는 VEV_5000~VEV_5300
@@ -2699,8 +2713,15 @@ class Trader:
 
         return orders
     
-    def get_hydrogel_orders(self, state: TradingState, traderObject: dict) -> List[Order]:
-        product = "HYDROGEL_PACK"
+    def get_z_score_orders(self, product: str, state: TradingState, traderObject: dict) -> List[Order]:
+        params = self.Z_SCORE_PARAMS.get(product, {
+            "valid_mid_history_length": 1000,
+            "z_score_threshold": 1.0,
+            "min_std": 1e-9,
+        })
+        valid_mid_history_length = int(params["valid_mid_history_length"])
+        z_score_threshold = float(params["z_score_threshold"])
+        min_std = float(params["min_std"])
         if product not in state.order_depths:
             return []
 
@@ -2709,23 +2730,23 @@ class Trader:
         if valid_mid is None:
             return []
 
-        key = "hydrogel_valid_mid_history"
+        key = f"{product}_valid_mid_history"
         history = traderObject.get(key, [])
         history.append(float(valid_mid))
-        history = history[-self.VALID_MID_HISTORY_LENGTH:]
+        history = history[-valid_mid_history_length:]
         traderObject[key] = history
 
-        if len(history) < self.VALID_MID_HISTORY_LENGTH:
+        if len(history) < valid_mid_history_length:
             return []
 
         fair_value = sum(history) / len(history)
         var = sum((x - fair_value) ** 2 for x in history) / len(history)
         std = math.sqrt(var)
 
-        if std <= self.MIN_STD or not math.isfinite(std):
+        if std <= min_std or not math.isfinite(std):
             return []
 
-        threshold = self.Z_SCORE_THRESHOLD * std
+        threshold = z_score_threshold * std
         return self.add_take_and_make_orders(
             product=product,
             order_depth=depth,
@@ -2774,10 +2795,10 @@ class Trader:
                 )
 
             elif product == "HYDROGEL_PACK":
-                orders = self.get_hydrogel_orders(state, traderObject)
+                orders = self.get_z_score_orders(product, state, traderObject)
 
             elif product == "VELVETFRUIT_EXTRACT":
-                orders = self.get_velvetfruit_against_vev4000_orders(state)
+                orders = self.get_z_score_orders(product, state, traderObject)
             
             elif product in self.MUST_BUY_0_VOUCHERS:
                 orders = self.get_must_buy_0_voucher_orders(product, state)
