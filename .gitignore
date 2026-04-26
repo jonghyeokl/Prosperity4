@@ -42,3 +42,5 @@ htmlcov/
 backtests/
 
 jonghyeok/data_analysis/output/theo_diff_multivariate_mr/
+jonghyeok/data_analysis/output/round3_theo_diff_cache.json
+jonghyeok/data_analysis/output/round3_theo_diff_cache_by_smile_window.json

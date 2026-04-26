@@ -1,13 +1,12 @@
-from datamodel import OrderDepth, UserId, TradingState, Order
-from typing import List, Any, Dict, Optional, Tuple
+from __future__ import annotations
+
 import json
-import jsonpickle
 import math
-import copy
-from datamodel import (
-    Listing, Observation, Order, OrderDepth, ProsperityEncoder,
-    Symbol, Trade, TradingState,
-)
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import pandas as pd
 
 
 # 여기에 생성된 DAY_VOUCHER_HISTORY_MAP을 그대로 붙여넣으시면 됩니다.
@@ -1814,169 +1813,77 @@ DAY_VOUCHER_HISTORY_MAP: Dict[int, Dict[str, List[Tuple[float, float]]]] = {1: {
                   (0.3237349509, 0.2475322514)]}}
 
 
+DATA_DIR = Path("data_capsule/round3")
+OUT_PATH = Path("jonghyeok/data_analysis/output/round3_theo_diff_cache_by_smile_window.json")
 
-# ============================================================
-#  Logger
-# ============================================================
-class Logger:
-    def __init__(self) -> None:
-        self.logs = ""
-        self.max_log_length = 3750
+DAY_RE = re.compile(r"day_(-?\d+)")
 
-    def print(self, *objects: Any, sep: str = " ", end: str = "\n") -> None:
-        self.logs += sep.join(map(str, objects)) + end
+SMILE_WINDOW_CANDIDATES = [10, 20, 40, 70, 100, 150, 200, 300, 400, 500, 750, 1000]
 
-    def flush(self, state: TradingState, orders: dict[Symbol, list[Order]], conversions: int, trader_data: str) -> None:
-        base_length = len(
-            self.to_json(
-                [
-                    self.compress_state(state, ""),
-                    self.compress_orders(orders),
-                    conversions,
-                    "",
-                    "",
-                ]
-            )
-        )
+UNDERLYING = "VELVETFRUIT_EXTRACT"
 
-        # We truncate state.traderData, trader_data, and self.logs to the same max. length to fit the log limit
-        max_item_length = (self.max_log_length - base_length) // 3
+ATM_VOUCHERS = {
+    "VEV_5000": 5000,
+    "VEV_5100": 5100,
+    "VEV_5200": 5200,
+    "VEV_5300": 5300,
+}
 
-        print(
-            self.to_json(
-                [
-                    self.compress_state(state, self.truncate(state.traderData, max_item_length)),
-                    self.compress_orders(orders),
-                    conversions,
-                    self.truncate(trader_data, max_item_length),
-                    self.truncate(self.logs, max_item_length),
-                ]
-            )
-        )
+IV_CURVE_FIT_VOUCHERS = {
+    "VEV_5000": 5000,
+    "VEV_5100": 5100,
+    "VEV_5200": 5200,
+    "VEV_5300": 5300,
+    "VEV_5400": 5400,
+    "VEV_5500": 5500,
+}
 
-        self.logs = ""
+VALID_BID_ASK_VOLUME = {
+    "HYDROGEL_PACK": 10,
+    "VELVETFRUIT_EXTRACT": 15,
+    "VEV_4000": 6,
+    "VEV_4500": 6,
+    "VEV_5000": 6,
+    "VEV_5100": 6,
+    "VEV_5200": 6,
+    "VEV_5300": 5,
+    "VEV_5400": 5,
+    "VEV_5500": 5,
+    "VEV_6000": 5,
+    "VEV_6500": 5,
+}
 
-    def compress_state(self, state: TradingState, trader_data: str) -> list[Any]:
-        return [
-            state.timestamp,
-            trader_data,
-            self.compress_listings(state.listings),
-            self.compress_order_depths(state.order_depths),
-            self.compress_trades(state.own_trades),
-            self.compress_trades(state.market_trades),
-            state.position,
-            self.compress_observations(state.observations),
-        ]
-
-    def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
-        compressed = []
-        for listing in listings.values():
-            compressed.append([listing.symbol, listing.product, listing.denomination])
-
-        return compressed
-
-    def compress_order_depths(self, order_depths: dict[Symbol, OrderDepth]) -> dict[Symbol, list[Any]]:
-        compressed = {}
-        for symbol, order_depth in order_depths.items():
-            compressed[symbol] = [order_depth.buy_orders, order_depth.sell_orders]
-
-        return compressed
-
-    def compress_trades(self, trades: dict[Symbol, list[Trade]]) -> list[list[Any]]:
-        compressed = []
-        for arr in trades.values():
-            for trade in arr:
-                compressed.append(
-                    [
-                        trade.symbol,
-                        trade.price,
-                        trade.quantity,
-                        trade.buyer,
-                        trade.seller,
-                        trade.timestamp,
-                    ]
-                )
-
-        return compressed
-
-    def compress_observations(self, observations: Observation) -> list[Any]:
-        conversion_observations = {}
-        for product, observation in observations.conversionObservations.items():
-            conversion_observations[product] = [
-                observation.bidPrice,
-                observation.askPrice,
-                observation.transportFees,
-                observation.exportTariff,
-                observation.importTariff,
-                observation.sugarPrice,
-                observation.sunlightIndex,
-            ]
-
-        return [observations.plainValueObservations, conversion_observations]
-
-    def compress_orders(self, orders: dict[Symbol, list[Order]]) -> list[list[Any]]:
-        compressed = []
-        for arr in orders.values():
-            for order in arr:
-                compressed.append([order.symbol, order.price, order.quantity])
-
-        return compressed
-
-    def to_json(self, value: Any) -> str:
-        return json.dumps(value, cls=ProsperityEncoder, separators=(",", ":"))
-
-    def truncate(self, value: str, max_length: int) -> str:
-        lo, hi = 0, min(len(value), max_length)
-        out = ""
-
-        while lo <= hi:
-            mid = (lo + hi) // 2
-
-            candidate = value[:mid]
-            if len(candidate) < len(value):
-                candidate += "..."
-
-            encoded_candidate = json.dumps(candidate)
-
-            if len(encoded_candidate) <= max_length:
-                out = candidate
-                lo = mid + 1
-            else:
-                hi = mid - 1
-
-        return out
-
-logger = Logger()
+DAYS_PER_YEAR = 365.0
 
 
 # ============================================================
-#  Black-Scholes (call, r=0)
+# Black-Scholes / IV / fitting
 # ============================================================
-def _norm_cdf(x):
+
+def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
-def _norm_pdf(x):
+def _norm_pdf(x: float) -> float:
     return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
 
 
-def bs_call_with_greeks(S, K, T, sigma):
+def bs_call_with_greeks(S: float, K: float, T: float, sigma: float):
     if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
         return max(S - K, 0.0), (1.0 if S > K else 0.0), 0.0
 
-    sqrtT = math.sqrt(T)
-    d1 = (math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT)
-    d2 = d1 - sigma * sqrtT
+    sqrt_t = math.sqrt(T)
+    d1 = (math.log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrt_t)
+    d2 = d1 - sigma * sqrt_t
 
     price = S * _norm_cdf(d1) - K * _norm_cdf(d2)
     delta = _norm_cdf(d1)
-    vega = S * _norm_pdf(d1) * sqrtT
+    vega = S * _norm_pdf(d1) * sqrt_t
 
     return price, delta, vega
 
 
-def implied_vol(V, S, K, T, tol=1e-4, max_iter=50):
-    """Bisection IV. Returns None if no solution in range."""
+def implied_vol(V: float, S: float, K: float, T: float, tol: float = 1e-4, max_iter: int = 50):
     if T <= 0 or V <= 0 or S <= 0 or K <= 0:
         return None
 
@@ -2009,7 +1916,6 @@ def implied_vol(V, S, K, T, tol=1e-4, max_iter=50):
 
 
 def fit_quadratic_from_points(points: List[Tuple[float, float]]) -> Optional[Tuple[float, float, float]]:
-    """OLS fit iv = a*m^2 + b*m + c. Returns None on singular."""
     n = len(points)
 
     if n < 4:
@@ -2028,7 +1934,6 @@ def fit_quadratic_from_points(points: List[Tuple[float, float]]) -> Optional[Tup
         Syx += v * m
         Syx2 += v * m2
 
-    # 3x3 normal equations
     M = [
         [Sx4, Sx3, Sx2, Syx2],
         [Sx3, Sx2, Sx1, Syx],
@@ -2072,627 +1977,396 @@ def fit_quadratic_from_points(points: List[Tuple[float, float]]) -> Optional[Tup
 
 
 # ============================================================
-#  Trader
+# CSV / orderbook mirror
 # ============================================================
-class Trader:
-
-    POSITION_LIMITS = {
-        "HYDROGEL_PACK": 200,
-        "VELVETFRUIT_EXTRACT": 200,
-        "VEV_4000": 300,
-        "VEV_4500": 300,
-        "VEV_5000": 300,
-        "VEV_5100": 300,
-        "VEV_5200": 300,
-        "VEV_5300": 300,
-        "VEV_5400": 300,
-        "VEV_5500": 300,
-        "VEV_6000": 300,
-        "VEV_6500": 300,
-    }
-
-    UNDERLYING = "VELVETFRUIT_EXTRACT"
-
-    # 실제 거래 대상은 유지: VEV_5000~VEV_5300
-    ATM_VOUCHERS = {
-        "VEV_5000": 5000,
-        "VEV_5100": 5100,
-        "VEV_5200": 5200,
-        "VEV_5300": 5300,
-    }
-
-    # IV curve fitting에는 결과가 가장 좋았던 VEV_5000~VEV_5500 사용
-    IV_CURVE_FIT_VOUCHERS = {
-        "VEV_5000": 5000,
-        "VEV_5100": 5100,
-        "VEV_5200": 5200,
-        "VEV_5300": 5300,
-        "VEV_5400": 5400,
-        "VEV_5500": 5500,
-    }
-
-    # Must Buy 0
-    MUST_BUY_0_VOUCHERS = [
-        "VEV_6000",
-        "VEV_6500",
-    ]
-
-    # ----- Deep ITM vouchers: fair = S - K -----
-    DEEP_ITM_VOUCHERS = {
-        "VEV_4000": 4000,
-        "VEV_4500": 4500,
-    }
-
-    # ----- Rolling smile fit -----
-    SMILE_WINDOW_PER_VOUCHER = 300
-    SMILE_MIN_POINTS_FOR_FIT = 600
-
-    # Valid volume
-    VALID_BID_ASK_VOLUME = {
-        "HYDROGEL_PACK": 10,
-        "VELVETFRUIT_EXTRACT": 15,
-        "VEV_4000": 6,
-        "VEV_4500": 6,
-        "VEV_5000": 6,
-        "VEV_5100": 6,
-        "VEV_5200": 6,
-        "VEV_5300": 5,
-        "VEV_5400": 5,
-        "VEV_5500": 5,
-        "VEV_6000": 5,
-        "VEV_6500": 5,
-    }
-
-    DAYS_PER_YEAR = 365.0
-
-    THEO_DIFF_WINDOW = 20
-    SCALE_WINDOW = 100
-    WARMUP_TICKS = 30
-
-    ENABLE_MAKE = True
-
-    # EMA_t 기준 beta 평균회귀 파라미터
-    # IV curve fitting은 VEV_5000~VEV_5500, 실제 거래는 VEV_5000~VEV_5300
-    MEAN_REVERSION_PARAMS = {
-        "VEV_5000": {"ema_window": 50, "beta": -1.003},
-        "VEV_5100": {"ema_window": 50, "beta": -0.998},
-        "VEV_5200": {"ema_window": 30, "beta": -0.993},
-        "VEV_5300": {"ema_window": 20, "beta": -0.986},
-    }
-
-    def bid(self):
-        return 0
-
-    def get_best_bid_ask(self, order_depth: OrderDepth):
-        best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
-        best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
-        return best_bid, best_ask
-
-    def get_best_valid_bid_ask(self, order_depth: OrderDepth, valid_volume: int):
-        best_valid_bid = None
-        best_valid_ask = None
-
-        for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
-            if bid_vol >= valid_volume:
-                best_valid_bid = bid_price
-                break
 
-        for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
-            if -ask_vol >= valid_volume:
-                best_valid_ask = ask_price
-                break
+class SimpleOrderDepth:
+    def __init__(self) -> None:
+        self.buy_orders: dict[int, int] = {}
+        self.sell_orders: dict[int, int] = {}
 
-        best_bid, best_ask = self.get_best_bid_ask(order_depth)
 
-        if best_valid_bid is None:
-            best_valid_bid = best_bid
-        if best_valid_ask is None:
-            best_valid_ask = best_ask
+def parse_day_from_path(path: Path) -> int:
+    m = DAY_RE.search(path.name)
+    if m is None:
+        raise ValueError(f"Cannot parse day from {path.name}")
+    return int(m.group(1))
 
-        return best_valid_bid, best_valid_ask
 
-    def get_valid_mid_price(self, order_depth: OrderDepth, valid_volume: int):
-        best_valid_bid, best_valid_ask = self.get_best_valid_bid_ask(order_depth, valid_volume)
+def read_csv_auto(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path, sep=";")
+    if len(df.columns) == 1:
+        df = pd.read_csv(path)
+    return df
 
-        if best_valid_bid is not None and best_valid_ask is not None:
-            return (best_valid_bid + best_valid_ask) / 2
 
-        return None
+def row_to_order_depth(row: pd.Series) -> SimpleOrderDepth:
+    depth = SimpleOrderDepth()
 
-    def add_buy_order(self, orders: List[Order], product: str, price: int, volume: int, buy_limit: int) -> int:
-        volume = min(volume, buy_limit)
+    for i in range(1, 4):
+        price = row.get(f"bid_price_{i}")
+        volume = row.get(f"bid_volume_{i}")
 
-        if volume > 0:
-            orders.append(Order(product, int(price), int(volume)))
-            buy_limit -= volume
+        if pd.notna(price) and pd.notna(volume) and int(volume) != 0:
+            depth.buy_orders[int(price)] = int(volume)
 
-        return buy_limit
+    for i in range(1, 4):
+        price = row.get(f"ask_price_{i}")
+        volume = row.get(f"ask_volume_{i}")
 
-    def add_sell_order(self, orders: List[Order], product: str, price: int, volume: int, sell_limit: int) -> int:
-        volume = min(volume, sell_limit)
+        if pd.notna(price) and pd.notna(volume) and int(volume) != 0:
+            v = int(volume)
+            if v > 0:
+                v = -v
+            depth.sell_orders[int(price)] = v
 
-        if volume > 0:
-            orders.append(Order(product, int(price), -int(volume)))
-            sell_limit -= volume
+    return depth
 
-        return sell_limit
 
-    def get_tte_years(self, timestamp: int, day_num: int) -> float:
-        progress_days = timestamp / 1_000_000.0
-        remaining_days = max(8.0 - day_num - progress_days, 1e-9)
-        return remaining_days / self.DAYS_PER_YEAR
+def get_best_bid_ask(order_depth: SimpleOrderDepth):
+    best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
+    best_ask = min(order_depth.sell_orders.keys()) if order_depth.sell_orders else None
+    return best_bid, best_ask
 
-    def ema(self, traderObject: dict, key: str, value: float, window: int) -> float:
-        alpha = 2.0 / (window + 1.0)
 
-        if key not in traderObject:
-            traderObject[key] = value
-            return value
+def get_best_valid_bid_ask(order_depth: SimpleOrderDepth, valid_volume: int):
+    best_valid_bid = None
+    best_valid_ask = None
 
-        new_value = alpha * value + (1.0 - alpha) * traderObject[key]
-        traderObject[key] = new_value
+    for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
+        if bid_vol >= valid_volume:
+            best_valid_bid = bid_price
+            break
 
-        return new_value
+    for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
+        if -ask_vol >= valid_volume:
+            best_valid_ask = ask_price
+            break
 
-    def init_smile_history_for_day(self, traderObject: dict, day_num: int) -> None:
-        """
-        day_num별 초기 smile history를 세팅합니다.
-        - DAY_VOUCHER_HISTORY_MAP에 day_num key가 없으면 빈 history로 시작합니다.
-        - 있으면 해당 day의 이전 데이터 history를 초기값으로 넣습니다.
-        - 길이는 상품별 SMILE_WINDOW_PER_VOUCHER개로 제한합니다.
-        - day가 바뀌면 history를 새로 초기화합니다.
-        """
-        hist_key = "smile_hist"
-        hist_day_key = "smile_hist_day"
+    best_bid, best_ask = get_best_bid_ask(order_depth)
 
-        if traderObject.get(hist_day_key) == day_num and hist_key in traderObject:
-            return
+    if best_valid_bid is None:
+        best_valid_bid = best_bid
+    if best_valid_ask is None:
+        best_valid_ask = best_ask
 
-        preload = DAY_VOUCHER_HISTORY_MAP.get(day_num, {})
-        hist = {}
+    return best_valid_bid, best_valid_ask
 
-        for product in self.IV_CURVE_FIT_VOUCHERS:
-            raw_points = preload.get(product, [])
-            clean_points = []
 
-            for item in raw_points:
-                if item is None or len(item) < 2:
-                    continue
+def get_valid_mid_price(order_depth: SimpleOrderDepth, valid_volume: int):
+    best_valid_bid, best_valid_ask = get_best_valid_bid_ask(order_depth, valid_volume)
 
-                try:
-                    m = float(item[0])
-                    iv = float(item[1])
-                except Exception:
-                    continue
+    if best_valid_bid is not None and best_valid_ask is not None:
+        return (best_valid_bid + best_valid_ask) / 2
 
-                if math.isfinite(m) and math.isfinite(iv) and iv > 0:
-                    clean_points.append((m, iv))
+    return None
 
-            hist[product] = clean_points[-self.SMILE_WINDOW_PER_VOUCHER:]
 
-        traderObject[hist_key] = hist
-        traderObject[hist_day_key] = day_num
+# ============================================================
+# Algorithm mirror until theo/theo_diff
+# ============================================================
 
-    # ==========================================================
-    #  Deep ITM voucher trading: fair = S - K
-    # ==========================================================
-    def get_deep_itm_voucher_orders(self, product: str, state: TradingState) -> List[Order]:
-        orders: List[Order] = []
+def get_tte_years(timestamp: int, day_num: int) -> float:
+    progress_days = timestamp / 1_000_000.0
+    remaining_days = max(8.0 - day_num - progress_days, 1e-9)
+    return remaining_days / DAYS_PER_YEAR
 
-        if self.UNDERLYING not in state.order_depths:
-            return orders
 
-        voucher_depth = state.order_depths[product]
-        underlying_depth = state.order_depths[self.UNDERLYING]
+def init_smile_history_for_day(
+    traderObject: dict,
+    day_num: int,
+    smile_window_per_voucher: int,
+) -> None:
+    hist_key = "smile_hist"
+    hist_day_key = "smile_hist_day"
 
-        underlying_mid = self.get_valid_mid_price(
-            underlying_depth,
-            self.VALID_BID_ASK_VOLUME[self.UNDERLYING],
-        )
+    if traderObject.get(hist_day_key) == day_num and hist_key in traderObject:
+        return
 
-        if underlying_mid is None:
-            return orders
+    preload = DAY_VOUCHER_HISTORY_MAP.get(day_num, {})
+    hist = {}
 
-        strike = self.DEEP_ITM_VOUCHERS[product]
-        fair = underlying_mid - strike
+    for product in IV_CURVE_FIT_VOUCHERS:
+        raw_points = preload.get(product, [])
+        clean_points = []
 
-        if fair <= 0:
-            return orders
-
-        best_bid, best_ask = self.get_best_bid_ask(voucher_depth)
-
-        if best_bid is None or best_ask is None:
-            return orders
-
-        position = state.position.get(product, 0)
-        limit = self.POSITION_LIMITS[product]
-
-        buy_limit = limit - position
-        sell_limit = limit + position
-
-        for bid_price, bid_vol in sorted(voucher_depth.buy_orders.items(), reverse=True):
-            if bid_price > fair:
-                sell_qty = min(bid_vol, sell_limit)
-                if sell_qty > 0:
-                    orders.append(Order(product, bid_price, -sell_qty))
-                    position -= sell_qty
-                    sell_limit -= sell_qty
-            else:
-                break
-
-        for ask_price, ask_vol in sorted(voucher_depth.sell_orders.items()):
-            if ask_price < fair:
-                buy_qty = min(-ask_vol, buy_limit)
-                if buy_qty > 0:
-                    orders.append(Order(product, ask_price, buy_qty))
-                    position += buy_qty
-                    buy_limit -= buy_qty
-            else:
-                break
-
-        sell_price = max(best_ask - 1, math.ceil(fair + 0.1)) if position < 0 else max(best_ask - 1, math.ceil(fair))
-        if sell_limit > 0:
-            orders.append(Order(product, sell_price, -sell_limit))
-
-        buy_price = min(best_bid + 1, math.floor(fair - 0.1)) if position > 0 else min(best_bid + 1, math.floor(fair))
-        if buy_limit > 0:
-            orders.append(Order(product, buy_price, buy_limit))
-
-        return orders
-    
-    def get_velvetfruit_against_vev4000_orders(self, state: TradingState) -> List[Order]:
-        orders: List[Order] = []
-
-        product = self.UNDERLYING
-        voucher = "VEV_4000"
-        strike = 4000
-
-        if product not in state.order_depths or voucher not in state.order_depths:
-            return orders
-
-        underlying_depth = state.order_depths[product]
-        voucher_depth = state.order_depths[voucher]
-
-        voucher_mid = self.get_valid_mid_price(
-            voucher_depth,
-            self.VALID_BID_ASK_VOLUME.get(voucher, 6),
-        )
-
-        if voucher_mid is None:
-            return orders
-
-        fair = voucher_mid + strike
-
-        if fair <= 0:
-            return orders
-
-        best_bid, best_ask = self.get_best_bid_ask(underlying_depth)
-
-        if best_bid is None or best_ask is None:
-            return orders
-
-        position = state.position.get(product, 0)
-        limit = self.POSITION_LIMITS[product]
-
-        buy_limit = limit - position
-        sell_limit = limit + position
-
-        # 1. Take: Velvetfruit bid가 VEV_4000 + 4000보다 비싸면 sell
-        for bid_price, bid_vol in sorted(underlying_depth.buy_orders.items(), reverse=True):
-            if bid_price > fair:
-                sell_qty = min(bid_vol, sell_limit)
-                if sell_qty > 0:
-                    orders.append(Order(product, bid_price, -sell_qty))
-                    position -= sell_qty
-                    sell_limit -= sell_qty
-            else:
-                break
-
-        # 2. Take: Velvetfruit ask가 VEV_4000 + 4000보다 싸면 buy
-        for ask_price, ask_vol in sorted(underlying_depth.sell_orders.items()):
-            if ask_price < fair:
-                buy_qty = min(-ask_vol, buy_limit)
-                if buy_qty > 0:
-                    orders.append(Order(product, ask_price, buy_qty))
-                    position += buy_qty
-                    buy_limit -= buy_qty
-            else:
-                break
-
-        # 3. Market make
-
-        sell_price = max(best_ask - 1, math.ceil(fair + 0.1)) if position < 0 else max(best_ask - 1, math.ceil(fair))
-        if sell_limit > 0:
-            orders.append(Order(product, sell_price, -sell_limit))
-        
-        buy_price = min(best_bid + 1, math.floor(fair - 0.1)) if position > 0 else min(best_bid + 1, math.floor(fair))
-        if buy_limit > 0:
-            orders.append(Order(product, buy_price, buy_limit))
-
-        return orders
-
-    # ==========================================================
-    #  Rolling smile fit
-    # ==========================================================
-    def update_smile_history_and_fit(
-        self,
-        state: TradingState,
-        traderObject: dict,
-        day_num: int,
-    ) -> Tuple[Optional[Tuple[float, float, float]], Optional[float], Optional[float]]:
-        """
-        1. day_num에 맞는 사전 history를 초기화합니다.
-        2. 현재 tick의 (m, iv)를 IV_CURVE_FIT_VOUCHERS 기준으로 history에 추가합니다.
-        3. 전체 point가 SMILE_MIN_POINTS_FOR_FIT 이상이면 quadratic IV curve를 fit합니다.
-
-        fallback coefficient는 쓰지 않습니다.
-        fit이 불가능하면 coeffs=None을 반환하고, 거래하지 않습니다.
-        """
-        if self.UNDERLYING not in state.order_depths:
-            return None, None, None
-
-        underlying_depth = state.order_depths[self.UNDERLYING]
-
-        underlying_mid = self.get_valid_mid_price(
-            underlying_depth,
-            self.VALID_BID_ASK_VOLUME[self.UNDERLYING],
-        )
-
-        if underlying_mid is None:
-            return None, None, None
-
-        T = self.get_tte_years(state.timestamp, day_num)
-
-        if T <= 0:
-            return None, underlying_mid, T
-
-        self.init_smile_history_for_day(traderObject, day_num)
-
-        hist_key = "smile_hist"
-        hist = traderObject[hist_key]
-
-        for product in self.IV_CURVE_FIT_VOUCHERS:
-            if product not in hist:
-                hist[product] = []
-
-        sqrt_t = math.sqrt(T)
-
-        for product, K in self.IV_CURVE_FIT_VOUCHERS.items():
-            if product not in state.order_depths:
+        for item in raw_points:
+            if item is None or len(item) < 2:
                 continue
 
-            option_depth = state.order_depths[product]
-            option_valid_mid = self.get_valid_mid_price(
-                option_depth,
-                self.VALID_BID_ASK_VOLUME.get(product, 6),
-            )
-
-            if option_valid_mid is None:
+            try:
+                m = float(item[0])
+                iv = float(item[1])
+            except Exception:
                 continue
 
-            iv = implied_vol(option_valid_mid, underlying_mid, K, T)
+            if math.isfinite(m) and math.isfinite(iv) and iv > 0:
+                clean_points.append((m, iv))
 
-            if iv is None or not math.isfinite(iv):
-                continue
+        hist[product] = clean_points[-smile_window_per_voucher:]
 
-            m = math.log(K / underlying_mid) / sqrt_t
+    traderObject[hist_key] = hist
+    traderObject[hist_day_key] = day_num
 
-            if not math.isfinite(m):
-                continue
 
-            hist[product].append((m, iv))
+def update_smile_history_and_fit(
+    books: dict[str, SimpleOrderDepth],
+    traderObject: dict,
+    timestamp: int,
+    day_num: int,
+    smile_window_per_voucher: int,
+):
+    if UNDERLYING not in books:
+        return None, None, None
 
-            if len(hist[product]) > self.SMILE_WINDOW_PER_VOUCHER:
-                hist[product] = hist[product][-self.SMILE_WINDOW_PER_VOUCHER:]
+    underlying_mid = get_valid_mid_price(
+        books[UNDERLYING],
+        VALID_BID_ASK_VOLUME[UNDERLYING],
+    )
 
-        all_points = []
+    if underlying_mid is None:
+        return None, None, None
 
-        for product in self.IV_CURVE_FIT_VOUCHERS:
-            all_points.extend(hist.get(product, []))
+    T = get_tte_years(timestamp, day_num)
 
-        if len(all_points) < self.SMILE_MIN_POINTS_FOR_FIT:
-            return None, underlying_mid, T
+    if T <= 0:
+        return None, underlying_mid, T
 
-        coeffs = fit_quadratic_from_points(all_points)
+    init_smile_history_for_day(traderObject, day_num, smile_window_per_voucher)
 
-        if coeffs is None:
-            return None, underlying_mid, T
+    hist = traderObject["smile_hist"]
 
-        return coeffs, underlying_mid, T
+    for product in IV_CURVE_FIT_VOUCHERS:
+        if product not in hist:
+            hist[product] = []
 
-    def get_fair_iv(self, m: float, rolling_coeffs: Optional[Tuple[float, float, float]]) -> Optional[float]:
-        if rolling_coeffs is None:
-            return None
+    sqrt_t = math.sqrt(T)
 
-        a, b, c = rolling_coeffs
-        fair_iv = a * m * m + b * m + c
+    for product, K in IV_CURVE_FIT_VOUCHERS.items():
+        if product not in books:
+            continue
 
-        if fair_iv <= 0 or not math.isfinite(fair_iv):
-            return None
-
-        return fair_iv
-
-    # ==========================================================
-    #  ATM voucher trading
-    # ==========================================================
-    def get_atm_voucher_orders(
-        self,
-        product: str,
-        state: TradingState,
-        traderObject: dict,
-        rolling_coeffs: Optional[Tuple[float, float, float]],
-        underlying_mid: Optional[float],
-        T: Optional[float],
-    ) -> List[Order]:
-        orders: List[Order] = []
-
-        if rolling_coeffs is None:
-            return orders
-
-        if underlying_mid is None or T is None:
-            return orders
-
-        if underlying_mid <= 0 or T <= 0:
-            return orders
-
-        option_depth = state.order_depths[product]
-
-        option_best_bid, option_best_ask = self.get_best_bid_ask(option_depth)
-
-        if option_best_bid is None or option_best_ask is None:
-            return orders
-
-        option_valid_mid = self.get_valid_mid_price(
-            option_depth,
-            self.VALID_BID_ASK_VOLUME.get(product, 6),
+        option_valid_mid = get_valid_mid_price(
+            books[product],
+            VALID_BID_ASK_VOLUME.get(product, 6),
         )
 
         if option_valid_mid is None:
-            return orders
+            continue
 
-        K = self.ATM_VOUCHERS[product]
-        sqrt_t = math.sqrt(T)
+        iv = implied_vol(option_valid_mid, underlying_mid, K, T)
+
+        if iv is None or not math.isfinite(iv):
+            continue
+
         m = math.log(K / underlying_mid) / sqrt_t
 
-        sigma = self.get_fair_iv(m, rolling_coeffs)
+        if not math.isfinite(m):
+            continue
 
-        if sigma is None:
-            return orders
+        hist[product].append((m, iv))
 
-        theo, _delta, vega = bs_call_with_greeks(underlying_mid, K, T, sigma)
+        if len(hist[product]) > smile_window_per_voucher:
+            hist[product] = hist[product][-smile_window_per_voucher:]
 
-        theo_diff = option_valid_mid - theo
+    all_points = []
+    for product in IV_CURVE_FIT_VOUCHERS:
+        all_points.extend(hist.get(product, []))
 
-        params = self.MEAN_REVERSION_PARAMS.get(
-            product,
-            {"ema_window": self.THEO_DIFF_WINDOW, "beta": -1.0},
-        )
-        ema_window = int(params["ema_window"])
-        beta = float(params["beta"])
+    smile_min_points_for_fit = smile_window_per_voucher * 2
 
-        mean_key = f"{product}_mean"
-        count_key = f"{product}_count"
+    if len(all_points) < smile_min_points_for_fit:
+        return None, underlying_mid, T
 
-        mean_diff = self.ema(
-            traderObject=traderObject,
-            key=mean_key,
-            value=theo_diff,
-            window=ema_window,
-        )
+    coeffs = fit_quadratic_from_points(all_points)
 
-        residual = theo_diff - mean_diff
-        expected_diff = theo_diff + beta * residual
-        fair_price = theo + expected_diff
+    if coeffs is None:
+        return None, underlying_mid, T
 
-        traderObject[count_key] = traderObject.get(count_key, 0) + 1
-        count = traderObject[count_key]
+    return coeffs, underlying_mid, T
 
-        if count < self.WARMUP_TICKS:
-            return orders
 
-        position = state.position.get(product, 0)
-        limit = self.POSITION_LIMITS[product]
+def get_fair_iv(m: float, coeffs: Optional[Tuple[float, float, float]]) -> Optional[float]:
+    if coeffs is None:
+        return None
 
-        buy_limit = limit - position
-        sell_limit = limit + position
+    a, b, c = coeffs
+    fair_iv = a * m * m + b * m + c
 
-        # Take
-        if option_depth.buy_orders:
-            for bid_price, bid_vol in sorted(option_depth.buy_orders.items(), reverse=True):
-                if bid_price >= fair_price:
-                    sell_qty = min(bid_vol, sell_limit)
-                    if sell_qty > 0:
-                        orders.append(Order(product, bid_price, -sell_qty))
-                        position -= sell_qty
-                        sell_limit -= sell_qty
-        
-        if option_depth.sell_orders:
-            for ask_price, ask_vol in sorted(option_depth.sell_orders.items()):
-                if ask_price <= fair_price:
-                    buy_qty = min(-ask_vol, buy_limit)
-                    if buy_qty > 0:
-                        orders.append(Order(product, ask_price, buy_qty))
-                        position += buy_qty
-                        buy_limit -= buy_qty
+    if fair_iv <= 0 or not math.isfinite(fair_iv):
+        return None
 
-        # Market make
-        if self.ENABLE_MAKE:
-            sell_price = max(option_best_ask - 1, math.ceil(fair_price))
-            sell_qty = min(sell_limit, position)
-            if sell_qty > 0:
-                orders.append(Order(product, sell_price, -sell_qty))
-                sell_limit -= sell_qty
-            buy_price = min(option_best_bid + 1, math.floor(fair_price))
-            buy_qty = min(buy_limit, -position)
-            if buy_qty > 0:
-                orders.append(Order(product, buy_price, buy_qty))
-                buy_limit -= buy_qty
+    return fair_iv
 
-        return orders
-    
-    def get_must_buy_0_voucher_orders(self, product: str, state: TradingState) -> List[Order]:
-        orders: List[Order] = []
 
-        buy_limit = self.POSITION_LIMITS[product] - state.position.get(product, 0)
+def compute_theo_feature(
+    product: str,
+    books: dict[str, SimpleOrderDepth],
+    timestamp: int,
+    day_num: int,
+    coeffs: Optional[Tuple[float, float, float]],
+    underlying_mid: Optional[float],
+    T: Optional[float],
+):
+    if coeffs is None or underlying_mid is None or T is None:
+        return None
 
-        if buy_limit > 0:
-            orders.append(Order(product, 0, buy_limit))
+    if product not in books:
+        return None
 
-        return orders
-    
+    option_depth = books[product]
+    option_best_bid, option_best_ask = get_best_bid_ask(option_depth)
 
-    def run(self, state: TradingState, day_num: int):
-        original_state = copy.deepcopy(state)
+    if option_best_bid is None or option_best_ask is None:
+        return None
 
-        traderObject = {}
+    option_valid_mid = get_valid_mid_price(
+        option_depth,
+        VALID_BID_ASK_VOLUME.get(product, 6),
+    )
 
-        if state.traderData is not None and state.traderData != "":
-            try:
-                traderObject = jsonpickle.decode(state.traderData)
-            except Exception:
-                traderObject = {}
+    if option_valid_mid is None:
+        return None
 
-        result: dict[Symbol, List[Order]] = {}
+    K = ATM_VOUCHERS[product]
+    sqrt_t = math.sqrt(T)
+    m = math.log(K / underlying_mid) / sqrt_t
 
-        # IV curve fitting은 주문 루프 전에 먼저 수행합니다.
-        # DAY_VOUCHER_HISTORY_MAP에 day_num key가 있으면 해당 history로 시작하고,
-        # 없으면 빈 history로 시작합니다. coeffs가 None이면 ATM voucher 거래를 하지 않습니다.
-        rolling_coeffs, underlying_mid, T = self.update_smile_history_and_fit(
-            state=state,
-            traderObject=traderObject,
-            day_num=day_num,
-        )
+    sigma = get_fair_iv(m, coeffs)
 
-        for product in state.order_depths:
-            orders: List[Order] = []
+    if sigma is None:
+        return None
 
-            if product in self.DEEP_ITM_VOUCHERS:
-                orders = self.get_deep_itm_voucher_orders(product, state)
+    theo, delta, vega = bs_call_with_greeks(underlying_mid, K, T, sigma)
+    theo_diff = option_valid_mid - theo
 
-            elif product in self.ATM_VOUCHERS:
-                orders = self.get_atm_voucher_orders(
-                    product=product,
-                    state=state,
+    return {
+        "product": product,
+        "day_num": day_num,
+        "timestamp": timestamp,
+        "underlying_mid": underlying_mid,
+        "T": T,
+        "K": K,
+        "m": m,
+        "option_valid_mid": option_valid_mid,
+        "option_best_bid": option_best_bid,
+        "option_best_ask": option_best_ask,
+        "iv_a": coeffs[0],
+        "iv_b": coeffs[1],
+        "iv_c": coeffs[2],
+        "fair_iv": sigma,
+        "theo": theo,
+        "delta": delta,
+        "vega": vega,
+        "theo_diff": theo_diff,
+    }
+
+
+def feature_key(day_num: int, timestamp: int, product: str) -> str:
+    return f"{day_num}|{timestamp}|{product}"
+
+
+def load_day_books(path: Path) -> list[tuple[int, dict[str, SimpleOrderDepth]]]:
+    df = read_csv_auto(path)
+
+    numeric_cols = [
+        "day", "timestamp",
+        "bid_price_1", "bid_volume_1", "bid_price_2", "bid_volume_2", "bid_price_3", "bid_volume_3",
+        "ask_price_1", "ask_volume_1", "ask_price_2", "ask_volume_2", "ask_price_3", "ask_volume_3",
+        "mid_price", "profit_and_loss",
+    ]
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    out = []
+    for timestamp, g in df.groupby("timestamp", sort=True):
+        timestamp = int(timestamp)
+        books: dict[str, SimpleOrderDepth] = {}
+
+        for _, row in g.iterrows():
+            product = row["product"]
+            books[product] = row_to_order_depth(row)
+
+        out.append((timestamp, books))
+
+    return out
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def main() -> None:
+    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    paths = sorted(DATA_DIR.glob("prices_round_3_day_*.csv"), key=parse_day_from_path)
+    if not paths:
+        raise FileNotFoundError(f"No prices_round_3_day_*.csv in {DATA_DIR}")
+
+    all_by_window: dict[str, dict[str, dict[str, Any]]] = {}
+
+    # CSV parse/orderbook 생성은 한 번만
+    day_data = []
+    for sorted_day_idx, path in enumerate(paths):
+        day_num = sorted_day_idx
+        print(f"[LOAD] path={path.name}, day_num={day_num}")
+        day_data.append((day_num, load_day_books(path)))
+
+    for smile_window in SMILE_WINDOW_CANDIDATES:
+        print(f"\n[WINDOW] SMILE_WINDOW_PER_VOUCHER={smile_window}, SMILE_MIN_POINTS_FOR_FIT={smile_window * 2}")
+
+        features: dict[str, dict[str, Any]] = {}
+
+        for day_num, ticks in day_data:
+            traderObject: dict[str, Any] = {}
+
+            for timestamp, books in ticks:
+                coeffs, underlying_mid, T = update_smile_history_and_fit(
+                    books=books,
                     traderObject=traderObject,
-                    rolling_coeffs=rolling_coeffs,
-                    underlying_mid=underlying_mid,
-                    T=T,
+                    timestamp=timestamp,
+                    day_num=day_num,
+                    smile_window_per_voucher=smile_window,
                 )
 
-            elif product == "HYDROGEL_PACK":
-                pass
+                for product in ATM_VOUCHERS:
+                    feature = compute_theo_feature(
+                        product=product,
+                        books=books,
+                        timestamp=timestamp,
+                        day_num=day_num,
+                        coeffs=coeffs,
+                        underlying_mid=underlying_mid,
+                        T=T,
+                    )
 
-            elif product == "VELVETFRUIT_EXTRACT":
-                orders = self.get_velvetfruit_against_vev4000_orders(state)
-            
-            elif product in self.MUST_BUY_0_VOUCHERS:
-                orders = self.get_must_buy_0_voucher_orders(product, state)
+                    if feature is None:
+                        continue
 
-            result[product] = orders
+                    key = feature_key(day_num, timestamp, product)
+                    features[key] = feature
 
-        traderData = jsonpickle.encode(traderObject)
-        conversions = 0
+        all_by_window[str(smile_window)] = features
+        print(f"features[{smile_window}]: {len(features)}")
 
-        logger.flush(original_state, result, conversions, traderData)
+    payload = {
+        "meta": {
+            "description": "Cache for testing SMILE_WINDOW_PER_VOUCHER and MEAN_REVERSION_PARAMS. Stores theo/theo_diff by smile_window; fair_price is recomputed during backtest.",
+            "data_dir": str(DATA_DIR),
+            "smile_window_candidates": SMILE_WINDOW_CANDIDATES,
+            "smile_min_points_for_fit_rule": "SMILE_MIN_POINTS_FOR_FIT = SMILE_WINDOW_PER_VOUCHER * 2",
+            "atm_vouchers": ATM_VOUCHERS,
+            "iv_curve_fit_vouchers": IV_CURVE_FIT_VOUCHERS,
+        },
+        "features_by_smile_window": all_by_window,
+    }
 
-        return result, conversions, traderData
+    OUT_PATH.write_text(json.dumps(payload, separators=(",", ":")))
+
+    print(f"\n[SAVED] {OUT_PATH}")
+
+
+if __name__ == "__main__":
+    main()

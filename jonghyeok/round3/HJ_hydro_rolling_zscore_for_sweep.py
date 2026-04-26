@@ -1,14 +1,24 @@
-from datamodel import OrderDepth, UserId, TradingState, Order
-from typing import List, Any, Dict, Optional, Tuple
 import json
+import copy
+from datamodel import OrderDepth, TradingState, Order, Symbol, Listing, Trade, Observation, ProsperityEncoder
+from typing import List, Any
 import jsonpickle
 import math
-import copy
-from datamodel import (
-    Listing, Observation, Order, OrderDepth, ProsperityEncoder,
-    Symbol, Trade, TradingState,
-)
+import os
 
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except Exception:
+        return default
+
+
+def env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except Exception:
+        return default
 
 # ============================================================
 #  Logger
@@ -144,10 +154,8 @@ class Logger:
 logger = Logger()
 
 
-# ============================================================
-#  Trader
-# ============================================================
 class Trader:
+    PRODUCT = "HYDROGEL_PACK"
 
     POSITION_LIMITS = {
         "HYDROGEL_PACK": 200,
@@ -164,8 +172,6 @@ class Trader:
         "VEV_6500": 300,
     }
 
-
-    # Valid volume
     VALID_BID_ASK_VOLUME = {
         "HYDROGEL_PACK": 10,
         "VELVETFRUIT_EXTRACT": 15,
@@ -181,22 +187,12 @@ class Trader:
         "VEV_6500": 5,
     }
 
-    # ==========================================================
-    # HYDROGEL - VELVET pair spread mean reversion
-    # ==========================================================
+    ENABLE_MAKE = True
 
-    HYDROGEL_MIN_HISTORY_LENGTH = 500
-    MAX_HYDROGEL_PAIR_POS = 200
+    VALID_MID_HISTORY_LENGTH = env_int("HJ_VALID_MID_HISTORY_LENGTH", 1000)
+    Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 1.0))
+    MIN_STD = env_float("HJ_MIN_STD", 1e-9)
 
-    HEDGE_RATIO = 5
-    SPREAD_COEF = 0.2
-    SPREAD_HISTORY_LENGTH = 1000
-
-    Z_SCORE_THRESHOLD = 1.0
-
-    # ==========================================================
-    def bid(self):
-        return 0
 
     def get_best_bid_ask(self, order_depth: OrderDepth):
         best_bid = max(order_depth.buy_orders.keys()) if order_depth.buy_orders else None
@@ -230,16 +226,105 @@ class Trader:
         best_valid_bid, best_valid_ask = self.get_best_valid_bid_ask(order_depth, valid_volume)
 
         if best_valid_bid is not None and best_valid_ask is not None:
-            return (best_valid_bid + best_valid_ask) / 2
+            return (best_valid_bid + best_valid_ask) / 2.0
 
         return None
-    
-    
+
+    def add_take_and_make_orders(
+        self,
+        *,
+        product: str,
+        order_depth: OrderDepth,
+        state: TradingState,
+        fair_value: float,
+        threshold: float,
+    ) -> List[Order]:
+        orders: List[Order] = []
+
+        best_bid, best_ask = self.get_best_bid_ask(order_depth)
+        if best_bid is None or best_ask is None:
+            return orders
+
+        position = state.position.get(product, 0)
+        limit = self.POSITION_LIMITS[product]
+        buy_limit = limit - position
+        sell_limit = limit + position
+
+        # Take sell: bid - fair_value > threshold
+        for bid_price, bid_vol in sorted(order_depth.buy_orders.items(), reverse=True):
+            if bid_price - fair_value <= threshold or sell_limit <= 0:
+                break
+
+            sell_qty = min(bid_vol, sell_limit)
+            if sell_qty > 0:
+                orders.append(Order(product, int(bid_price), -int(sell_qty)))
+                position -= sell_qty
+                sell_limit -= sell_qty
+
+        # Take buy: ask - fair_value < -threshold
+        for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
+            if ask_price - fair_value >= -threshold or buy_limit <= 0:
+                break
+
+            buy_qty = min(-ask_vol, buy_limit)
+            if buy_qty > 0:
+                orders.append(Order(product, int(ask_price), int(buy_qty)))
+                position += buy_qty
+                buy_limit -= buy_qty
+
+        # Make
+        if self.ENABLE_MAKE:
+            sell_price = max(best_ask - 1, math.ceil(fair_value + threshold))
+            buy_price = min(best_bid + 1, math.floor(fair_value - threshold))
+
+            if sell_limit > 0:
+                orders.append(Order(product, int(sell_price), -int(sell_limit)))
+
+            if buy_limit > 0:
+                orders.append(Order(product, int(buy_price), int(buy_limit)))
+
+        return orders
+
+    def get_hydrogel_orders(self, state: TradingState, traderObject: dict) -> List[Order]:
+        product = self.PRODUCT
+        if product not in state.order_depths:
+            return []
+
+        depth = state.order_depths[product]
+        valid_mid = self.get_valid_mid_price(depth, self.VALID_BID_ASK_VOLUME[product])
+        if valid_mid is None:
+            return []
+
+        key = "hydrogel_valid_mid_history"
+        history = traderObject.get(key, [])
+        history.append(float(valid_mid))
+        history = history[-self.VALID_MID_HISTORY_LENGTH:]
+        traderObject[key] = history
+
+        if len(history) < self.VALID_MID_HISTORY_LENGTH:
+            return []
+
+        fair_value = sum(history) / len(history)
+        var = sum((x - fair_value) ** 2 for x in history) / len(history)
+        std = math.sqrt(var)
+
+        if std <= self.MIN_STD or not math.isfinite(std):
+            return []
+
+        threshold = self.Z_SCORE_THRESHOLD * std
+        return self.add_take_and_make_orders(
+            product=product,
+            order_depth=depth,
+            state=state,
+            fair_value=fair_value,
+            threshold=threshold,
+        )
+
 
     def run(self, state: TradingState, day_num: int):
-        original_state = copy.deepcopy(state)
-
         traderObject = {}
+
+        original_state = copy.deepcopy(state)
 
         if state.traderData is not None and state.traderData != "":
             try:
@@ -247,17 +332,12 @@ class Trader:
             except Exception:
                 traderObject = {}
 
-        result: dict[Symbol, List[Order]] = {}
+        result = {}
         for product in state.order_depths:
-            orders: List[Order] = []
-
-            if product == "HYDROGEL_PACK":
-                pass
-
+            if product == self.PRODUCT:
+                result[product] = self.get_hydrogel_orders(state, traderObject)
             else:
-                orders = []
-
-            result[product] = orders
+                result[product] = []
 
         traderData = jsonpickle.encode(traderObject)
         conversions = 0
