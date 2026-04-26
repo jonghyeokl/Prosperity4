@@ -149,8 +149,8 @@ class Trader:
 
         return orders
 
-    def get_hydrogel_orders(self, state: TradingState, traderObject: dict) -> List[Order]:
-        product = self.PRODUCT
+    def get_product_orders(self, state: TradingState, traderObject: dict) -> List[Order]:
+        product = PRODUCT
         if product not in state.order_depths:
             return []
 
@@ -161,8 +161,8 @@ class Trader:
 
         x = float(valid_mid)
         alpha = 2.0 / (self.EMA_WINDOW + 1.0)
-        ema_key = "hydrogel_ema"
-        count_key = "hydrogel_ema_count"
+        ema_key = f"{PRODUCT}_ema"
+        count_key = f"{PRODUCT}_ema_count"
 
         if ema_key not in traderObject:
             traderObject[ema_key] = x
@@ -195,8 +195,8 @@ class Trader:
 
         result = {}
         for product in state.order_depths:
-            if product == self.PRODUCT:
-                result[product] = self.get_hydrogel_orders(state, traderObject)
+            if product == PRODUCT:
+                result[product] = self.get_product_orders(state, traderObject)
             else:
                 result[product] = []
 
