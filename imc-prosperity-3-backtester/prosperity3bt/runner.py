@@ -275,6 +275,9 @@ def match_orders(
     result: BacktestResult,
     trade_matching_mode: TradeMatchingMode,
 ) -> None:
+    state.own_trades = {product: [] for product in data.products}
+    state.market_trades = {product: [] for product in data.products}
+    
     market_trades = {
         product: [MarketTrade(t, t.quantity, t.quantity) for t in trades]
         for product, trades in data.trades[state.timestamp].items()
@@ -349,10 +352,6 @@ def run_backtest(
     for timestamp in timestamps_iterator:
         state.timestamp = timestamp
         state.traderData = trader_data
-        # own_trades / market_trades should contain only trades since the last TradingState.
-        # Reset them every iteration so stale trades from the previous timestamp do not leak through.
-        state.own_trades = {product: [] for product in data.products}
-        state.market_trades = {product: [] for product in data.products}
 
         prepare_state(state, data)
 

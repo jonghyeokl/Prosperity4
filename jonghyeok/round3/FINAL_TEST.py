@@ -2804,7 +2804,6 @@ class Trader:
                 orders.append(Order(product, int(bid_price), -int(sell_qty)))
                 position -= sell_qty
                 sell_limit -= sell_qty
-                buy_limit = limit - position
 
         # Take buy: ask가 fair보다 threshold 이상 싸면 산다
         for ask_price, ask_vol in sorted(order_depth.sell_orders.items()):
@@ -2816,7 +2815,6 @@ class Trader:
                 orders.append(Order(product, int(ask_price), int(buy_qty)))
                 position += buy_qty
                 buy_limit -= buy_qty
-                sell_limit = limit + position
 
         # Make: fair +/- threshold 기준으로 양쪽 주문
         if self.ENABLE_MAKE:
@@ -3003,39 +3001,39 @@ class Trader:
         # IV curve fitting은 주문 루프 전에 먼저 수행합니다.
         # DAY_VOUCHER_HISTORY_MAP에 day_num key가 있으면 해당 history로 시작하고,
         # 없으면 빈 history로 시작합니다. coeffs가 None이면 ATM voucher 거래를 하지 않습니다.
-        rolling_coeffs, underlying_mid, T = self.update_smile_history_and_fit(
-            state=state,
-            traderObject=traderObject,
-            day_num=day_num,
-        )
+        # rolling_coeffs, underlying_mid, T = self.update_smile_history_and_fit(
+        #     state=state,
+        #     traderObject=traderObject,
+        #     day_num=day_num,
+        # )
 
         for product in state.order_depths:
             orders: List[Order] = []
 
-            if product in self.DEEP_ITM_VOUCHERS:
-                orders = self.get_deep_itm_voucher_orders(product, state)
+            # if product in self.DEEP_ITM_VOUCHERS:
+            #     orders = self.get_deep_itm_voucher_orders(product, state)
 
-            elif product in self.ATM_VOUCHERS:
-                orders = self.get_atm_voucher_orders(
-                    product=product,
-                    state=state,
-                    traderObject=traderObject,
-                    rolling_coeffs=rolling_coeffs,
-                    underlying_mid=underlying_mid,
-                    T=T,
-                )
+            # elif product in self.ATM_VOUCHERS:
+            #     orders = self.get_atm_voucher_orders(
+            #         product=product,
+            #         state=state,
+            #         traderObject=traderObject,
+            #         rolling_coeffs=rolling_coeffs,
+            #         underlying_mid=underlying_mid,
+            #         T=T,
+            #     )
 
-            elif product in self.EMA_ZSCORE_PRODUCTS:
+            if product in self.EMA_ZSCORE_PRODUCTS:
                 orders = self.get_ema_zscore_orders(product, state, traderObject)
 
-            elif product in self.Z_SCORE_PRODUCTS:
-                orders = self.get_z_score_orders(product, state, traderObject)
+            # elif product in self.Z_SCORE_PRODUCTS:
+            #     orders = self.get_z_score_orders(product, state, traderObject)
 
-            elif product in self.MUST_BUY_0_VOUCHERS:
-                orders = self.get_must_buy_0_voucher_orders(product, state)
+            # elif product in self.MUST_BUY_0_VOUCHERS:
+            #     orders = self.get_must_buy_0_voucher_orders(product, state)
             
-            elif product == "VEV_5500":
-                orders = self.get_vev_5500_orders(product, state, traderObject, day_num)
+            # elif product == "VEV_5500":
+            #     orders = self.get_vev_5500_orders(product, state, traderObject, day_num)
 
             result[product] = orders
 

@@ -1,0 +1,4 @@
+product;name;buy_count;buy_avg_quantity;sell_count;sell_avg_quantity;avg_quantity;in_order_book_ratio;pnl;pnl_day_1;pnl_day_2;pnl_day_3
+VEV_5500;Mark 22;0;0.0;306;3.4934640522875817;3.4934640522875817;0.0;-283.0;-163.5;-738.0;52.5
+VEV_5500;Mark 01;299;3.4849498327759196;0;0.0;3.4849498327759196;1.0;279.0;169.0;723.0;-55.0
+VEV_5500;Mark 14;7;3.857142857142857;0;0.0;3.857142857142857;1.0;4.0;-5.5;15.0;2.5
