@@ -206,6 +206,18 @@ def participant_counts(trades: pd.DataFrame, column: str) -> list[tuple[str, int
     return sorted(counts.items(), key=lambda x: (-x[1], x[0]))
 
 
+def participant_total_counts(trades: pd.DataFrame) -> list[tuple[str, int]]:
+    participants = pd.concat(
+        [
+            trades.loc[trades["buyer"].astype(str).str.len() > 0, "buyer"],
+            trades.loc[trades["seller"].astype(str).str.len() > 0, "seller"],
+        ],
+        ignore_index=True,
+    )
+    counts = participants.value_counts().to_dict()
+    return sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+
+
 def build_order_book_lookup(prices: pd.DataFrame) -> dict[tuple[str, int, int], tuple[set[float], set[float]]]:
     lookup: dict[tuple[str, int, int], tuple[set[float], set[float]]] = {}
 
@@ -338,7 +350,12 @@ def build_product_day_figure(
                 "seller=%{customdata[3]}<br>"
                 "order_book_side=%{customdata[4]}<extra></extra>"
             ),
-            marker={"size": 7, "opacity": 0.8, "symbol": "circle"},
+            marker={
+                "size": 7,
+                "opacity": 0.8,
+                "symbol": "circle",
+                "color": "#1f77b4",
+            },
         )
     )
 
@@ -380,11 +397,24 @@ def checkbox_html(kind: str, items: list[tuple[str, int]]) -> str:
     return "\n".join(rows)
 
 
+def target_name_html(items: list[tuple[str, int]]) -> str:
+    rows = []
+    for name, count in items:
+        safe_name = escape(name, quote=True)
+        rows.append(
+            f"<button type='button' class='target-name-button' data-name='{safe_name}'>"
+            f"<span>{safe_name}</span><span class='participant-count'>{count}</span>"
+            "</button>"
+        )
+    return "\n".join(rows)
+
+
 def build_html_document(
     figures: list[dict[str, object]],
     title: str,
     buyer_counts: list[tuple[str, int]],
     seller_counts: list[tuple[str, int]],
+    target_counts: list[tuple[str, int]],
 ) -> str:
     chunks = [
         "<!DOCTYPE html>",
@@ -404,6 +434,9 @@ def build_html_document(
         "    .participant-name { flex: 1; }",
         "    .participant-count { color: #6b7280; font-size: 12px; }",
         "    .sidebar button { width: 48%; margin: 4px 1%; padding: 7px 8px; border: 1px solid #d1d5db; border-radius: 8px; background: #f3f4f6; color: #111827; cursor: pointer; font-size: 12px; }",
+        "    .target-name-button { width: 100% !important; display: flex; justify-content: space-between; align-items: center; text-align: left; margin: 4px 0 !important; }",
+        "    .target-name-button.active { background: #111827; color: #fff; border-color: #111827; }",
+        "    .target-name-button.active .participant-count { color: #d1d5db; }",
         "    .button-row { display: flex; justify-content: space-between; gap: 4px; margin-bottom: 6px; }",
         "    .hint { margin-top: 10px; font-size: 12px; line-height: 1.4; color: #555; }",
         "    .status { margin-top: 8px; font-size: 12px; color: #1f2937; }",
@@ -424,8 +457,11 @@ def build_html_document(
         "    <h3>SELLER</h3>",
         "    <div class='button-row'><button type='button' data-target='seller' data-action='select'>Select all</button><button type='button' data-target='seller' data-action='clear'>Clear</button></div>",
         checkbox_html("seller", seller_counts),
+        "    <h3>TARGET_NAME</h3>",
+        "    <div class='button-row'><button type='button' id='clearTargetName'>Clear target</button></div>",
+        target_name_html(target_counts),
         "    <div class='status' id='tradeFilterStatus'>Showing all trade points.</div>",
-        "    <div class='hint'>A trade is shown only when both its buyer and seller are selected.</div>",
+        "    <div class='hint'>Buyer/Seller filter: selected buyer and seller only. TARGET_NAME: selected participant's trades only; green=buy, red=sell.</div>",
         "  </div>",
     ]
 
@@ -453,6 +489,12 @@ def build_html_document(
     chunks.append(f"    const FIGURE_META = {json.dumps(figure_meta)};")
     chunks.append(
         r"""
+    const DEFAULT_TRADE_COLOR = '#1f77b4';
+    const TARGET_BUY_COLOR = '#16a34a';
+    const TARGET_SELL_COLOR = '#dc2626';
+    const TARGET_BOTH_COLOR = '#f59e0b';
+    let activeTargetName = null;
+
     function getSelectedNames(selector) {
       const selected = new Set();
       document.querySelectorAll(selector).forEach((el) => {
@@ -461,21 +503,41 @@ def build_html_document(
       return selected;
     }
 
-    function filterPayload(payload, selectedBuyers, selectedSellers) {
-      const filtered = { x: [], y: [], customdata: [] };
+    function filterPayload(payload, selectedBuyers, selectedSellers, targetName) {
+      const filtered = { x: [], y: [], customdata: [], markerColor: [] };
       for (let i = 0; i < payload.x.length; i++) {
         const buyer = payload.buyer[i];
         const seller = payload.seller[i];
+
+        if (targetName !== null) {
+          const targetBought = buyer === targetName;
+          const targetSold = seller === targetName;
+          if (!targetBought && !targetSold) continue;
+
+          filtered.x.push(payload.x[i]);
+          filtered.y.push(payload.y[i]);
+          filtered.customdata.push(payload.customdata[i]);
+          if (targetBought && targetSold) {
+            filtered.markerColor.push(TARGET_BOTH_COLOR);
+          } else if (targetBought) {
+            filtered.markerColor.push(TARGET_BUY_COLOR);
+          } else {
+            filtered.markerColor.push(TARGET_SELL_COLOR);
+          }
+          continue;
+        }
+
         if (selectedBuyers.has(buyer) && selectedSellers.has(seller)) {
           filtered.x.push(payload.x[i]);
           filtered.y.push(payload.y[i]);
           filtered.customdata.push(payload.customdata[i]);
+          filtered.markerColor.push(DEFAULT_TRADE_COLOR);
         }
       }
       return filtered;
     }
 
-    function applyParticipantFilter() {
+    function applyTradeFilter() {
       const selectedBuyers = getSelectedNames('.buyer-filter');
       const selectedSellers = getSelectedNames('.seller-filter');
       let shown = 0;
@@ -484,7 +546,7 @@ def build_html_document(
       FIGURE_META.forEach((meta) => {
         const gd = document.getElementById(meta.div_id);
         if (!gd) return;
-        const filtered = filterPayload(meta.trade_payload, selectedBuyers, selectedSellers);
+        const filtered = filterPayload(meta.trade_payload, selectedBuyers, selectedSellers, activeTargetName);
         shown += filtered.x.length;
         total += meta.trade_payload.x.length;
         Plotly.restyle(
@@ -493,12 +555,30 @@ def build_html_document(
             x: [filtered.x],
             y: [filtered.y],
             customdata: [filtered.customdata],
+            'marker.color': [filtered.markerColor],
           },
           [meta.trade_trace_index]
         );
       });
 
-      document.getElementById('tradeFilterStatus').textContent = `Showing ${shown} / ${total} trade points.`;
+      const statusPrefix = activeTargetName === null ? '' : `TARGET_NAME=${activeTargetName}. `;
+      document.getElementById('tradeFilterStatus').textContent = `${statusPrefix}Showing ${shown} / ${total} trade points.`;
+    }
+
+    function setActiveTargetName(targetName) {
+      activeTargetName = targetName;
+      document.querySelectorAll('.target-name-button').forEach((button) => {
+        button.classList.toggle('active', button.dataset.name === targetName);
+      });
+      applyTradeFilter();
+    }
+
+    function clearActiveTargetName() {
+      activeTargetName = null;
+      document.querySelectorAll('.target-name-button').forEach((button) => {
+        button.classList.remove('active');
+      });
+      applyTradeFilter();
     }
 
     function applyTraceVisibility(traceIndex, visible) {
@@ -510,7 +590,10 @@ def build_html_document(
     }
 
     document.querySelectorAll('.participant-filter').forEach((el) => {
-      el.addEventListener('change', applyParticipantFilter);
+      el.addEventListener('change', () => {
+        if (activeTargetName !== null) return;
+        applyTradeFilter();
+      });
     });
 
     document.querySelectorAll('.trace-filter').forEach((el) => {
@@ -526,9 +609,17 @@ def build_html_document(
         document.querySelectorAll(`.${target}-filter`).forEach((el) => {
           el.checked = checked;
         });
-        applyParticipantFilter();
+        if (activeTargetName === null) applyTradeFilter();
       });
     });
+
+    document.querySelectorAll('.target-name-button').forEach((button) => {
+      button.addEventListener('click', () => {
+        setActiveTargetName(button.dataset.name);
+      });
+    });
+
+    document.getElementById('clearTargetName').addEventListener('click', clearActiveTargetName);
     """
     )
     chunks.append("  </script>")
@@ -575,6 +666,7 @@ def main() -> None:
         title=f"Prosperity market charts - {label}",
         buyer_counts=participant_counts(trades, "buyer"),
         seller_counts=participant_counts(trades, "seller"),
+        target_counts=participant_total_counts(trades),
     )
     output_path.write_text(html, encoding="utf-8")
 

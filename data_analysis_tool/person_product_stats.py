@@ -52,7 +52,10 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data_analysis_tool" / "outputs"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create per-product participant buy/sell stats, order-book-side ratios, and average marked PnL CSV files."
+        description=(
+            "Create per-product participant buy/sell stats, order-book-side ratios, "
+            "average marked PnL, and per-day marked PnL CSV files."
+        )
     )
     parser.add_argument("--round", type=int, default=4, help="Round number. Default: 4")
     parser.add_argument("--round-dir", type=Path, help="Directory containing prices/trades CSV files")
@@ -208,7 +211,7 @@ def compute_in_order_book_counts(product_trades: pd.DataFrame, lookup: dict[tupl
     """
     trade.price가 bid_price_1..3에 있으면 buyer가 order book 쪽입니다.
     trade.price가 ask_price_1..3에 있으면 seller가 order book 쪽입니다.
-    이론적으로 둘 다 true인 경우는 드물지만, 발생하면 buyer와 seller 양쪽에 모두 +1 합니다.
+    둘 다 true이면 buyer와 seller 양쪽에 모두 +1 합니다.
     """
     counts: dict[str, int] = {}
 
@@ -242,7 +245,7 @@ def main() -> None:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    days = sorted(prices["day"].unique())
+    days = sorted(int(day) for day in prices["day"].unique())
 
     for product in PRODUCT_ORDER:
         product_trades = trades.loc[trades["symbol"] == product].copy()
@@ -255,15 +258,15 @@ def main() -> None:
             sell_rows = product_trades.loc[product_trades["seller"] == name]
             all_quantities = pd.concat([buy_rows["quantity"], sell_rows["quantity"]], ignore_index=True)
 
-            pnl_values = []
+            day_pnls: dict[int, float] = {}
             for day in days:
-                close = close_price(prices, product, int(day))
+                close = close_price(prices, product, day)
                 if close is None:
                     continue
                 product_day_trades = product_trades.loc[product_trades["day"] == day]
-                pnl_values.append(marked_pnl_for_day(product_day_trades, name, close))
+                day_pnls[day] = marked_pnl_for_day(product_day_trades, name, close)
 
-            avg_pnl = sum(pnl_values) / len(pnl_values) if pnl_values else 0.0
+            avg_pnl = sum(day_pnls.values()) / len(day_pnls) if day_pnls else 0.0
 
             buy_count = int(len(buy_rows))
             sell_count = int(len(sell_rows))
@@ -271,36 +274,36 @@ def main() -> None:
             in_order_book_count = int(order_book_counts.get(name, 0))
             in_order_book_ratio = in_order_book_count / total_count if total_count > 0 else 0.0
 
-            rows.append(
-                {
-                    "product": product,
-                    "name": name,
-                    "buy_count": buy_count,
-                    "buy_avg_quantity": safe_mean(buy_rows["quantity"]),
-                    "sell_count": sell_count,
-                    "sell_avg_quantity": safe_mean(sell_rows["quantity"]),
-                    "avg_quantity": safe_mean(all_quantities),
-                    "in_order_book_ratio": in_order_book_ratio,
-                    "pnl": avg_pnl,
-                    "_total_count": total_count,
-                }
-            )
+            row = {
+                "product": product,
+                "name": name,
+                "buy_count": buy_count,
+                "buy_avg_quantity": safe_mean(buy_rows["quantity"]),
+                "sell_count": sell_count,
+                "sell_avg_quantity": safe_mean(sell_rows["quantity"]),
+                "avg_quantity": safe_mean(all_quantities),
+                "in_order_book_ratio": in_order_book_ratio,
+                "pnl": avg_pnl,
+                "_total_count": total_count,
+            }
+            for day in days:
+                row[f"pnl_day_{day}"] = day_pnls.get(day, 0.0)
+            rows.append(row)
 
-        out_df = pd.DataFrame(
-            rows,
-            columns=[
-                "product",
-                "name",
-                "buy_count",
-                "buy_avg_quantity",
-                "sell_count",
-                "sell_avg_quantity",
-                "avg_quantity",
-                "in_order_book_ratio",
-                "pnl",
-                "_total_count",
-            ],
-        )
+        output_columns = [
+            "product",
+            "name",
+            "buy_count",
+            "buy_avg_quantity",
+            "sell_count",
+            "sell_avg_quantity",
+            "avg_quantity",
+            "in_order_book_ratio",
+            "pnl",
+            *[f"pnl_day_{day}" for day in days],
+            "_total_count",
+        ]
+        out_df = pd.DataFrame(rows, columns=output_columns)
 
         if not out_df.empty:
             out_df = out_df.sort_values(["_total_count", "name"], ascending=[False, True], kind="stable")
