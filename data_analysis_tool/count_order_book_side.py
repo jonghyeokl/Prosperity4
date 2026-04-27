@@ -107,7 +107,6 @@ def read_prices(paths: Iterable[Path]) -> pd.DataFrame:
     for col in BID_PRICE_COLUMNS + ASK_PRICE_COLUMNS:
         if col in prices.columns:
             prices[col] = pd.to_numeric(prices[col], errors="coerce")
-            prices.loc[prices[col] == 0.0, col] = pd.NA
     return prices
 
 

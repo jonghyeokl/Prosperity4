@@ -135,7 +135,6 @@ def read_prices(paths: Iterable[Path]) -> pd.DataFrame:
 
     for col in PRICE_COLUMNS:
         prices[col] = pd.to_numeric(prices[col], errors="coerce")
-        prices.loc[prices[col] == 0.0, col] = pd.NA
 
     prices = prices.sort_values(["product", "day", "timestamp"], kind="stable").reset_index(drop=True)
     return prices

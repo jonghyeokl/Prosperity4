@@ -151,7 +151,6 @@ def read_prices(paths: Iterable[Path]) -> pd.DataFrame:
     for col in set(PRICE_COLUMNS + ALL_BOOK_PRICE_COLUMNS):
         if col in prices.columns:
             prices[col] = pd.to_numeric(prices[col], errors="coerce")
-            prices.loc[prices[col] == 0.0, col] = pd.NA
 
     prices = prices.sort_values(
         ["product", "day", "timestamp"], kind="stable"
