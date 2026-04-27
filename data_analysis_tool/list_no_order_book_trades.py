@@ -10,11 +10,8 @@ import pandas as pd
 
 PRICE_FILE_PATTERN = "prices_round_*_day_*.csv"
 TRADE_FILE_PATTERN = "trades_round_*_day_*.csv"
-
-PRICE_COLUMNS = ["mid_price", "bid_price_1", "ask_price_1"]
 BID_PRICE_COLUMNS = ["bid_price_1", "bid_price_2", "bid_price_3"]
 ASK_PRICE_COLUMNS = ["ask_price_1", "ask_price_2", "ask_price_3"]
-ALL_ORDER_BOOK_PRICE_COLUMNS = BID_PRICE_COLUMNS + ASK_PRICE_COLUMNS
 
 PRODUCT_ORDER = [
     "HYDROGEL_PACK",
@@ -52,17 +49,17 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data_analysis_tool" / "outputs"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create per-product participant buy/sell stats, order-book-side ratios, and average marked PnL CSV files."
+        description="Create a CSV of trades whose price is absent from both buy and sell sides of the order book."
     )
     parser.add_argument("--round", type=int, default=4, help="Round number. Default: 4")
     parser.add_argument("--round-dir", type=Path, help="Directory containing prices/trades CSV files")
     parser.add_argument("--prices", nargs="*", type=Path, help="Explicit prices CSV file paths")
     parser.add_argument("--trades", nargs="*", type=Path, help="Explicit trades CSV file paths")
     parser.add_argument(
-        "--output-dir",
+        "--output",
         type=Path,
-        default=DEFAULT_OUTPUT_DIR / "person_product_stats",
-        help="Output directory for per-product CSV files.",
+        default=DEFAULT_OUTPUT_DIR / "no_order_book_trades.csv",
+        help="Output CSV path.",
     )
     return parser.parse_args()
 
@@ -109,8 +106,8 @@ def read_prices(paths: Iterable[Path]) -> pd.DataFrame:
     prices["day"] = pd.to_numeric(prices["day"], errors="raise").astype(int)
     prices["timestamp"] = pd.to_numeric(prices["timestamp"], errors="raise").astype(int)
 
-    # 빈 칸만 NaN으로 처리합니다. 0 가격은 VEV_6500 등에서 유효한 order book 가격일 수 있으므로 유지합니다.
-    for col in set(PRICE_COLUMNS + ALL_ORDER_BOOK_PRICE_COLUMNS):
+    # 빈 칸만 NaN으로 처리합니다. 0 가격은 유효 가격입니다.
+    for col in BID_PRICE_COLUMNS + ASK_PRICE_COLUMNS:
         if col in prices.columns:
             prices[col] = pd.to_numeric(prices[col], errors="coerce")
     return prices
@@ -130,49 +127,7 @@ def read_trades(paths: Iterable[Path]) -> pd.DataFrame:
     trades["day"] = pd.to_numeric(trades["day"], errors="raise").astype(int)
     trades["timestamp"] = pd.to_numeric(trades["timestamp"], errors="raise").astype(int)
     trades["price"] = pd.to_numeric(trades["price"], errors="coerce").astype(float)
-    trades["quantity"] = pd.to_numeric(trades["quantity"], errors="coerce").astype(float)
     return trades
-
-
-def close_price(prices: pd.DataFrame, product: str, day: int) -> float | None:
-    product_day = prices.loc[(prices["product"] == product) & (prices["day"] == day)].copy()
-    if product_day.empty:
-        return None
-
-    exact_close = product_day.loc[product_day["timestamp"] == 999900]
-    if not exact_close.empty:
-        row = exact_close.sort_values("timestamp").iloc[-1]
-    else:
-        row = product_day.sort_values("timestamp").iloc[-1]
-
-    for col in ["mid_price", "bid_price_1", "ask_price_1"]:
-        value = row.get(col)
-        if pd.notna(value):
-            return float(value)
-    return None
-
-
-def marked_pnl_for_day(product_day_trades: pd.DataFrame, name: str, close: float) -> float:
-    cash = 0.0
-    position = 0.0
-
-    for trade in product_day_trades.itertuples(index=False):
-        qty = float(trade.quantity)
-        price = float(trade.price)
-        if str(trade.buyer) == name:
-            position += qty
-            cash -= price * qty
-        if str(trade.seller) == name:
-            position -= qty
-            cash += price * qty
-
-    return cash + position * close
-
-
-def safe_mean(series: pd.Series) -> float:
-    if len(series) == 0:
-        return 0.0
-    return float(series.mean())
 
 
 def build_order_book_lookup(prices: pd.DataFrame) -> dict[tuple[str, int, int], tuple[set[float], set[float]]]:
@@ -204,32 +159,6 @@ def price_in_set(price: float, values: set[float]) -> bool:
     return any(math.isclose(price, value, rel_tol=0.0, abs_tol=1e-9) for value in values)
 
 
-def compute_in_order_book_counts(product_trades: pd.DataFrame, lookup: dict[tuple[str, int, int], tuple[set[float], set[float]]]) -> dict[str, int]:
-    """
-    trade.price가 bid_price_1..3에 있으면 buyer가 order book 쪽입니다.
-    trade.price가 ask_price_1..3에 있으면 seller가 order book 쪽입니다.
-    이론적으로 둘 다 true인 경우는 드물지만, 발생하면 buyer와 seller 양쪽에 모두 +1 합니다.
-    """
-    counts: dict[str, int] = {}
-
-    for trade in product_trades.itertuples(index=False):
-        product = str(trade.symbol)
-        bid_prices, ask_prices = lookup.get((product, int(trade.day), int(trade.timestamp)), (set(), set()))
-        price = float(trade.price)
-
-        if price_in_set(price, bid_prices):
-            buyer = str(trade.buyer)
-            if buyer:
-                counts[buyer] = counts.get(buyer, 0) + 1
-
-        if price_in_set(price, ask_prices):
-            seller = str(trade.seller)
-            if seller:
-                counts[seller] = counts.get(seller, 0) + 1
-
-    return counts
-
-
 def main() -> None:
     args = parse_args()
     prices_paths, trades_paths = discover_files(args)
@@ -238,79 +167,38 @@ def main() -> None:
     trades = trades.loc[trades["symbol"].isin(PRODUCT_ORDER)].copy()
 
     lookup = build_order_book_lookup(prices)
+    rows = []
 
-    output_dir = args.output_dir.resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    product_rank = {product: idx for idx, product in enumerate(PRODUCT_ORDER)}
+    trades = trades.sort_values(
+        by=["symbol", "day", "timestamp"],
+        key=lambda s: s.map(product_rank) if s.name == "symbol" else s,
+        kind="stable",
+    )
 
-    days = sorted(prices["day"].unique())
+    for trade in trades.itertuples(index=False):
+        product = str(trade.symbol)
+        bid_prices, ask_prices = lookup.get((product, int(trade.day), int(trade.timestamp)), (set(), set()))
+        price = float(trade.price)
+        in_buy = price_in_set(price, bid_prices)
+        in_sell = price_in_set(price, ask_prices)
 
-    for product in PRODUCT_ORDER:
-        product_trades = trades.loc[trades["symbol"] == product].copy()
-        order_book_counts = compute_in_order_book_counts(product_trades, lookup)
-        names = sorted((set(product_trades["buyer"]) | set(product_trades["seller"])) - {""})
-
-        rows = []
-        for name in names:
-            buy_rows = product_trades.loc[product_trades["buyer"] == name]
-            sell_rows = product_trades.loc[product_trades["seller"] == name]
-            all_quantities = pd.concat([buy_rows["quantity"], sell_rows["quantity"]], ignore_index=True)
-
-            pnl_values = []
-            for day in days:
-                close = close_price(prices, product, int(day))
-                if close is None:
-                    continue
-                product_day_trades = product_trades.loc[product_trades["day"] == day]
-                pnl_values.append(marked_pnl_for_day(product_day_trades, name, close))
-
-            avg_pnl = sum(pnl_values) / len(pnl_values) if pnl_values else 0.0
-
-            buy_count = int(len(buy_rows))
-            sell_count = int(len(sell_rows))
-            total_count = buy_count + sell_count
-            in_order_book_count = int(order_book_counts.get(name, 0))
-            in_order_book_ratio = in_order_book_count / total_count if total_count > 0 else 0.0
-
+        if not in_buy and not in_sell:
             rows.append(
                 {
                     "product": product,
-                    "name": name,
-                    "buy_count": buy_count,
-                    "buy_avg_quantity": safe_mean(buy_rows["quantity"]),
-                    "sell_count": sell_count,
-                    "sell_avg_quantity": safe_mean(sell_rows["quantity"]),
-                    "avg_quantity": safe_mean(all_quantities),
-                    "in_order_book_ratio": in_order_book_ratio,
-                    "pnl": avg_pnl,
-                    "_total_count": total_count,
+                    "timestamp": int(trade.timestamp),
+                    "buyer": str(trade.buyer),
+                    "seller": str(trade.seller),
                 }
             )
 
-        out_df = pd.DataFrame(
-            rows,
-            columns=[
-                "product",
-                "name",
-                "buy_count",
-                "buy_avg_quantity",
-                "sell_count",
-                "sell_avg_quantity",
-                "avg_quantity",
-                "in_order_book_ratio",
-                "pnl",
-                "_total_count",
-            ],
-        )
-
-        if not out_df.empty:
-            out_df = out_df.sort_values(["_total_count", "name"], ascending=[False, True], kind="stable")
-            out_df = out_df.drop(columns=["_total_count"])
-        else:
-            out_df = out_df.drop(columns=["_total_count"], errors="ignore")
-
-        output_path = output_dir / f"{product}_person_stats.csv"
-        out_df.to_csv(output_path, sep=";", index=False)
-        print(f"Saved {product} participant stats to: {output_path}")
+    output_path = args.output.resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=["product", "timestamp", "buyer", "seller"]).to_csv(
+        output_path, sep=";", index=False
+    )
+    print(f"Saved trades absent from both order book sides to: {output_path}")
 
 
 if __name__ == "__main__":
