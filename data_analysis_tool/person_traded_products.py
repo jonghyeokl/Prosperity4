@@ -22,7 +22,6 @@ PRODUCT_ORDER = [
     "VEV_5400",
     "VEV_5500",
     "VEV_6000",
-    "VEV_6500",
 ]
 PRODUCT_RANK = {product: i for i, product in enumerate(PRODUCT_ORDER)}
 
@@ -57,11 +56,6 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_OUTPUT_DIR / "person_traded_products.txt",
         help="Output text path.",
-    )
-    parser.add_argument(
-        "--unique",
-        action="store_true",
-        help="If set, output each product only once per person. Default repeats products by trade count.",
     )
     return parser.parse_args()
 
@@ -134,8 +128,7 @@ def main() -> None:
         counts = person_product_counts[person]
         products: list[str] = []
         for product in sorted(counts.keys(), key=product_sort_key):
-            repeat = 1 if args.unique else counts[product]
-            products.extend([product] * repeat)
+            products.append(product)
 
         lines.append(person)
         lines.append(", ".join(products))
