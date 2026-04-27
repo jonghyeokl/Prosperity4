@@ -4,7 +4,7 @@ import jsonpickle
 import math
 import os
 
-PRODUCT = "VEV_5500"
+PRODUCT = "VEV_5400"
 
 def env_int(name: str, default: int) -> int:
     try:
@@ -55,7 +55,7 @@ class Trader:
     ENABLE_MAKE = True
 
     EMA_WINDOW = env_int("HJ_EMA_WINDOW", 1000)
-    Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 0.75))
+    Z_SCORE_THRESHOLD = env_float("HJ_Z_SCORE_THRESHOLD", env_float("HJ_THRESHOLD", 1.25))
     MIN_STD = env_float("HJ_MIN_STD", 1e-9)
 
 
