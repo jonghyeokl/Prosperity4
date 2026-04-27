@@ -25,6 +25,7 @@ PRODUCT_ORDER = [
     "VEV_5400",
     "VEV_5500",
     "VEV_6000",
+    "VEV_6500",
 ]
 
 DAY_RE = re.compile(r"day_(-?\d+)")

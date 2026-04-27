@@ -32,6 +32,7 @@ PRODUCT_ORDER = [
     "VEV_5400",
     "VEV_5500",
     "VEV_6000",
+    "VEV_6500",
 ]
 PRODUCT_RANK = {product: i for i, product in enumerate(PRODUCT_ORDER)}
 
