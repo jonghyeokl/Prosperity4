@@ -228,7 +228,7 @@ def cli(
             day_num,
             print_output,
             match_trades,
-            True,
+            False,
             show_progress_bars,
         )
 
