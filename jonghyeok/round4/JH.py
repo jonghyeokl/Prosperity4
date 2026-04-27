@@ -1226,8 +1226,8 @@ class Trader:
     }
 
     # ----- Rolling smile fit -----
-    SMILE_WINDOW_PER_VOUCHER = 300
-    SMILE_MIN_POINTS_FOR_FIT = 600
+    SMILE_WINDOW_PER_VOUCHER = 150
+    SMILE_MIN_POINTS_FOR_FIT = 300
 
     # Valid volume
     VALID_BID_ASK_VOLUME = {
@@ -1378,15 +1378,18 @@ class Trader:
         - 있으면 해당 day의 이전 데이터 history를 초기값으로 넣습니다.
         - 길이는 상품별 SMILE_WINDOW_PER_VOUCHER개로 제한합니다.
         - day가 바뀌면 history를 새로 초기화합니다.
+        - 각 product별 is_avged flag도 초기화합니다.
         """
         hist_key = "smile_hist"
         hist_day_key = "smile_hist_day"
+        is_avged_key = "smile_hist_is_avged"
 
         if traderObject.get(hist_day_key) == day_num and hist_key in traderObject:
             return
 
         preload = DAY_VOUCHER_HISTORY_MAP.get(day_num, {})
         hist = {}
+        is_avged = {}
 
         for product in self.IV_CURVE_FIT_VOUCHERS:
             raw_points = preload.get(product, [])
@@ -1407,7 +1410,11 @@ class Trader:
 
             hist[product] = clean_points[-self.SMILE_WINDOW_PER_VOUCHER:]
 
+            # preload는 이미 연속 두 점 평균으로 만들어진 history라고 가정
+            is_avged[product] = True
+
         traderObject[hist_key] = hist
+        traderObject[is_avged_key] = is_avged
         traderObject[hist_day_key] = day_num
 
     # ==========================================================
@@ -1471,77 +1478,6 @@ class Trader:
         if sell_limit > 0:
             orders.append(Order(product, sell_price, -sell_limit))
 
-        buy_price = min(best_bid + 1, math.floor(fair - 0.1)) if position > 0 else min(best_bid + 1, math.floor(fair))
-        if buy_limit > 0:
-            orders.append(Order(product, buy_price, buy_limit))
-
-        return orders
-    
-    def get_velvetfruit_against_vev4000_orders(self, state: TradingState) -> List[Order]:
-        orders: List[Order] = []
-
-        product = self.UNDERLYING
-        voucher = "VEV_4000"
-        strike = 4000
-
-        if product not in state.order_depths or voucher not in state.order_depths:
-            return orders
-
-        underlying_depth = state.order_depths[product]
-        voucher_depth = state.order_depths[voucher]
-
-        voucher_mid = self.get_valid_mid_price(
-            voucher_depth,
-            self.VALID_BID_ASK_VOLUME.get(voucher, 6),
-        )
-
-        if voucher_mid is None:
-            return orders
-
-        fair = voucher_mid + strike
-
-        if fair <= 0:
-            return orders
-
-        best_bid, best_ask = self.get_best_bid_ask(underlying_depth)
-
-        if best_bid is None or best_ask is None:
-            return orders
-
-        position = state.position.get(product, 0)
-        limit = self.POSITION_LIMITS[product]
-
-        buy_limit = limit - position
-        sell_limit = limit + position
-
-        # 1. Take: Velvetfruit bid가 VEV_4000 + 4000보다 비싸면 sell
-        for bid_price, bid_vol in sorted(underlying_depth.buy_orders.items(), reverse=True):
-            if bid_price > fair:
-                sell_qty = min(bid_vol, sell_limit)
-                if sell_qty > 0:
-                    orders.append(Order(product, bid_price, -sell_qty))
-                    position -= sell_qty
-                    sell_limit -= sell_qty
-            else:
-                break
-
-        # 2. Take: Velvetfruit ask가 VEV_4000 + 4000보다 싸면 buy
-        for ask_price, ask_vol in sorted(underlying_depth.sell_orders.items()):
-            if ask_price < fair:
-                buy_qty = min(-ask_vol, buy_limit)
-                if buy_qty > 0:
-                    orders.append(Order(product, ask_price, buy_qty))
-                    position += buy_qty
-                    buy_limit -= buy_qty
-            else:
-                break
-
-        # 3. Market make
-
-        sell_price = max(best_ask - 1, math.ceil(fair + 0.1)) if position < 0 else max(best_ask - 1, math.ceil(fair))
-        if sell_limit > 0:
-            orders.append(Order(product, sell_price, -sell_limit))
-        
         buy_price = min(best_bid + 1, math.floor(fair - 0.1)) if position > 0 else min(best_bid + 1, math.floor(fair))
         if buy_limit > 0:
             orders.append(Order(product, buy_price, buy_limit))
@@ -1617,7 +1553,22 @@ class Trader:
             if not math.isfinite(m):
                 continue
 
-            hist[product].append((m, iv))
+            is_avged_key = "smile_hist_is_avged"
+            if is_avged_key not in traderObject:
+                traderObject[is_avged_key] = {}
+
+            is_avged = traderObject[is_avged_key].get(product, True)
+
+            if not is_avged and len(hist[product]) > 0:
+                last_m, last_iv = hist[product][-1]
+                hist[product][-1] = (
+                    0.5 * (float(last_m) + float(m)),
+                    0.5 * (float(last_iv) + float(iv)),
+                )
+                traderObject[is_avged_key][product] = True
+            else:
+                hist[product].append((m, iv))
+                traderObject[is_avged_key][product] = False
 
             if len(hist[product]) > self.SMILE_WINDOW_PER_VOUCHER:
                 hist[product] = hist[product][-self.SMILE_WINDOW_PER_VOUCHER:]
