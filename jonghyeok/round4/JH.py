@@ -2057,7 +2057,7 @@ class Trader:
                 traderObject = {}
 
         result: dict[Symbol, List[Order]] = {}
-        traderObject["length"] = 0
+        # traderObject["length"] = 0
 
         # IV curve fitting은 주문 루프 전에 먼저 수행합니다.
         # DAY_VOUCHER_HISTORY_MAP에 day_num key가 있으면 해당 history로 시작하고,
@@ -2099,8 +2099,8 @@ class Trader:
             result[product] = orders
 
         traderData = jsonpickle.encode(traderObject, unpicklable=False)
-        traderObject["length"] = len(traderData)
-        traderData = jsonpickle.encode(traderObject, unpicklable=False)
+        # traderObject["length"] = len(traderData)
+        # traderData = jsonpickle.encode(traderObject, unpicklable=False)
         conversions = 0
 
         logger.flush(original_state, result, conversions, traderData)
