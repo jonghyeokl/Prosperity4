@@ -117,8 +117,9 @@ logger = Logger()
 
 
 class Trader:
-    target_name = "Mark 38"
-    target_product = "HYDROGEL_PACK"
+    target_hogu_names = ["Mark 55"]
+    target_goat_names = ["Mark 01, Mark 14"]
+    target_product = "VELVETFRUIT_EXTRACT"
 
     POSITION_LIMITS = {
         "HYDROGEL_PACK": 200,
@@ -201,20 +202,29 @@ class Trader:
         position = state.position.get(product, 0)
         return max(0, position_limit + position)
 
-    def get_target_net_quantity(self, state: TradingState, product: str) -> int:
+    def get_target_net_quantity(self, state: TradingState, product: str) -> tuple[int, int]:
         net_quantity = 0
+        traded_price = 0
 
         trades = []
         trades.extend(state.market_trades.get(product, []))
         trades.extend(state.own_trades.get(product, []))
 
         for trade in trades:
-            if trade.buyer == self.target_name:
+            if trade.buyer in self.target_hogu_names:
                 net_quantity += trade.quantity
-            if trade.seller == self.target_name:
+                traded_price = int(trade.price)
+            elif trade.seller in self.target_hogu_names:
                 net_quantity -= trade.quantity
+                traded_price = int(trade.price)
+            elif trade.buyer in self.target_goat_names:
+                net_quantity -= trade.quantity
+                traded_price = int(trade.price)
+            elif trade.seller in self.target_goat_names:
+                net_quantity += trade.quantity
+                traded_price = int(trade.price)
 
-        return net_quantity
+        return net_quantity, traded_price
 
     def get_target_counter_orders(self, state: TradingState, product: str) -> List[Order]:
         orders: List[Order] = []
@@ -222,16 +232,16 @@ class Trader:
         order_depth = state.order_depths[product]
         best_bid, best_ask = self.get_best_bid_ask(order_depth)
 
-        target_net_quantity = self.get_target_net_quantity(state, product)
+        target_net_quantity, traded_price = self.get_target_net_quantity(state, product)
 
         if target_net_quantity > 0:
             sell_volume = self.get_max_sell_volume(state, product)
-            if best_bid is not None and sell_volume > 0:
+            if best_bid is not None and sell_volume > 0 and best_bid >= traded_price - 1:
                 orders.append(Order(product, best_bid, -sell_volume))
 
         elif target_net_quantity < 0:
             buy_volume = self.get_max_buy_volume(state, product)
-            if best_ask is not None and buy_volume > 0:
+            if best_ask is not None and buy_volume > 0 and best_ask <= traded_price + 1:
                 orders.append(Order(product, best_ask, buy_volume))
 
         return orders
@@ -240,7 +250,6 @@ class Trader:
         original_state = copy.deepcopy(state)
 
         traderObject = {}
-        traderObject["test"] = state.market_trades.get(self.target_product, [])
         if state.traderData is not None and state.traderData != "":
             try:
                 traderObject = jsonpickle.decode(state.traderData)
